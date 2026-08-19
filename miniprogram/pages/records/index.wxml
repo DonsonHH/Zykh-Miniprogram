@@ -1,0 +1,78 @@
+<view class="page care-page records-page">
+  <care-screen model="{{carePage}}" bind:action="onCarePageAction" />
+
+  <view wx:if="{{detailVisible}}" class="ui-sheet-mask" bindtap="closeDetail"></view>
+  <view wx:if="{{detailVisible}}" class="ui-sheet care-record-sheet" catchtap="noop">
+    <view class="ui-sheet-grip"></view>
+    <view class="ui-sheet-head">
+      <view class="ui-sheet-title">{{detailTitle}}</view>
+      <view class="ui-sheet-close" bindtap="closeDetail" hover-class="tap-feedback" hover-stay-time="80">关闭</view>
+    </view>
+    <scroll-view scroll-y class="care-record-sheet__scroll">
+      <view wx:if="{{detailList.length}}">
+        <view
+          wx:for="{{detailList}}"
+          wx:key="id"
+          class="care-record-sheet__item {{detailMode === 'list' ? 'is-actionable' : ''}}"
+          bindtap="openDetailRecord"
+          data-record-id="{{item.id}}"
+          hover-class="{{detailMode === 'list' ? 'tap-feedback' : 'none'}}"
+          hover-stay-time="80"
+          aria-role="{{detailMode === 'list' ? 'button' : ''}}"
+          aria-label="{{detailMode === 'list' ? '查看' + item.title + '详情' : item.title}}"
+        >
+          <view class="care-record-sheet__time {{item.type === 'vitals' ? 'is-vitals' : (item.type === 'safety' ? 'is-safety' : '')}}">
+            <text>{{item.time || '--:--'}}</text>
+            <label>{{item.date}}</label>
+          </view>
+          <view class="care-record-sheet__copy">
+            <view class="care-record-sheet__title">{{item.title}}</view>
+            <view wx:if="{{item.type === 'dose'}}" class="care-record-sheet__meta">
+              <text>时间：{{item.fullTime}}</text>
+              <text wx:if="{{item.medicine}}">药品：{{item.medicine}}</text>
+              <text wx:if="{{item.quantityText}}">数量：{{item.quantityText}}</text>
+              <text wx:if="{{item.slot}}">仓位：{{item.slot}} 号仓</text>
+            </view>
+            <view wx:elif="{{item.type === 'safety'}}" class="care-record-sheet__meta care-record-sheet__meta--safety">
+              <text>人物：{{item.personName}}</text>
+              <text>药品：{{item.medicineName}}</text>
+              <text>核查结果：{{item.checkStatusText}}</text>
+              <text>是否出药：{{item.outcomeText}}</text>
+              <text>原因摘要：{{item.detailSummary}}</text>
+              <text>时间：{{item.fullTime}}</text>
+              <text>查看状态：{{item.readText}}</text>
+              <text>版本证据：{{item.evidenceText}}</text>
+            </view>
+            <view wx:else class="care-record-sheet__meta care-record-sheet__meta--vitals">
+              <text>时间：{{item.fullTime}}</text>
+              <text>测量对象：{{item.person}}</text>
+              <text>体温：{{item.bodyTemp}}</text>
+              <text>血氧：{{item.spo2}}</text>
+              <text>心率：{{item.heartRate}}</text>
+              <text>质量：{{item.quality}}</text>
+              <text wx:if="{{item.attributionKind === 'BROKEN_INQUIRY'}}">记录编号：{{item.recordId}}</text>
+              <text wx:if="{{item.attributionKind === 'BROKEN_INQUIRY'}}">问询会话：{{item.inquirySessionId}}</text>
+              <text wx:if="{{item.attributionKind === 'BROKEN_INQUIRY'}}">归属来源：{{item.attributionSource}}</text>
+              <text wx:if="{{item.attributionKind === 'BROKEN_INQUIRY' && item.attributionCapability}}">归属能力：{{item.attributionCapability}}</text>
+              <text wx:if="{{item.attributionKind === 'BROKEN_INQUIRY' && item.schemaRevision}}">云端版本：{{item.schemaRevision}}</text>
+            </view>
+          </view>
+        </view>
+      </view>
+      <view wx:else class="ui-empty">{{emptyText}}</view>
+      <view
+        wx:if="{{detailMode === 'list' && safetyPaginationVisible}}"
+        class="care-record-sheet__more {{safetyPaginationStatus === 'loading' ? 'is-loading' : (safetyPaginationStatus === 'error' ? 'is-error' : '')}}"
+        bindtap="loadMoreSafetyRecords"
+        hover-class="{{safetyPaginationStatus === 'loading' ? 'none' : 'tap-feedback'}}"
+        hover-stay-time="80"
+        aria-role="button"
+        aria-disabled="{{safetyPaginationStatus === 'loading'}}"
+        aria-label="{{safetyPaginationLabel}}，{{safetyPaginationHint}}"
+      >
+        <text class="care-record-sheet__more-label">{{safetyPaginationLabel}}</text>
+        <text class="care-record-sheet__more-hint">{{safetyPaginationHint}}</text>
+      </view>
+    </scroll-view>
+  </view>
+</view>

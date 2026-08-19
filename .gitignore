@@ -1,0 +1,36 @@
+# WeChat DevTools local state
+project.private.config.json
+
+# Dependencies and build output
+node_modules/
+dist/
+build/
+.pnpm-store/
+coverage/
+
+# Runtime and secrets
+.env
+.env.*
+*.db
+*.sqlite*
+*.log
+*.pid
+*secret*
+device-secrets.json
+
+# Local tooling and evidence
+.codex-tools/
+.codex-artifacts/
+.runtime-evidence/
+__pycache__/
+*.py[cod]
+
+# Station is maintained separately
+.station_upgrade_runtime_*/
+qsm_agent/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

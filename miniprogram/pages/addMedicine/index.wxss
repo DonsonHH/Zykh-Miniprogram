@@ -1,0 +1,472 @@
+.medicine-editor-page {
+  padding-top: 20rpx;
+}
+
+.medicine-editor-loading {
+  margin-top: 20rpx;
+}
+
+.medicine-editor-error {
+  margin-top: 20rpx;
+  padding: 34rpx 28rpx;
+  text-align: center;
+}
+
+.medicine-editor-error__title {
+  color: #172033;
+  font-size: 34rpx;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.medicine-editor-error__message {
+  margin-top: 12rpx;
+  color: #52627a;
+  font-size: 27rpx;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.medicine-editor-error__retry {
+  width: 100%;
+  min-height: 88rpx;
+  margin-top: 24rpx;
+  border-radius: 20rpx;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 28rpx;
+  font-weight: 850;
+}
+
+.medicine-editor-stale {
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  margin-bottom: 20rpx;
+  padding: 20rpx 22rpx;
+  border-color: #f4cf75;
+  background: #fff8e8;
+}
+
+.medicine-editor-stale__copy {
+  flex: 1;
+  color: #845b16;
+  font-size: 25rpx;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.medicine-editor-stale__retry {
+  flex: 0 0 auto;
+  min-height: 68rpx;
+  margin: 0;
+  padding: 0 18rpx;
+  border-radius: 16rpx;
+  background: #b7791f;
+  color: #ffffff;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.medicine-editor-stale__retry::after {
+  border: 0;
+}
+
+.medicine-flow {
+  display: flex;
+  align-items: flex-start;
+  margin: 0 0 20rpx;
+  padding: 18rpx 16rpx;
+  border: 1rpx solid #dbe7f3;
+  border-radius: 20rpx;
+  background: #ffffff;
+}
+
+.medicine-flow__step {
+  flex: 0 0 132rpx;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 7rpx;
+  color: #59677b;
+}
+
+.medicine-flow__number {
+  width: 40rpx;
+  height: 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #e9eef5;
+  color: #59677b;
+  font-size: 24rpx;
+  font-weight: 900;
+}
+
+.medicine-flow__label {
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.25;
+  text-align: center;
+}
+
+.medicine-flow__line {
+  flex: 1;
+  min-width: 18rpx;
+  height: 2rpx;
+  margin-top: 19rpx;
+  background: #dbe7f3;
+}
+
+.medicine-flow__step.is-active,
+.medicine-flow__step.is-complete {
+  color: #174fd6;
+}
+
+.medicine-flow__step.is-active .medicine-flow__number,
+.medicine-flow__step.is-complete .medicine-flow__number,
+.medicine-flow__line.is-complete {
+  background: #2563eb;
+  color: #ffffff;
+}
+
+.medicine-flow-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12rpx;
+  margin-top: 18rpx;
+}
+
+.medicine-flow-actions--next {
+  grid-template-columns: 1fr;
+}
+
+.medicine-flow-button {
+  min-width: 0;
+  min-height: 88rpx;
+  border: 1rpx solid #cbd9e8;
+  border-radius: 20rpx;
+  background: #ffffff;
+  color: #344054;
+  font-size: 25rpx;
+  font-weight: 850;
+}
+
+.medicine-flow-button--primary {
+  border-color: #2563eb;
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 10rpx 20rpx rgba(37, 99, 235, 0.15);
+}
+
+.medicine-flow-actions .medicine-submit {
+  width: auto;
+  min-width: 0;
+  min-height: 88rpx;
+  box-shadow: 0 10rpx 20rpx rgba(37, 99, 235, 0.15);
+}
+
+.medicine-slot-card,
+.medicine-profile-card,
+.medicine-expiry-card,
+.medicine-stock-card {
+  padding: 24rpx;
+}
+
+.medicine-card-head {
+  min-height: 48rpx;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18rpx;
+}
+
+.medicine-card-title {
+  margin-top: 6rpx;
+  color: #172033;
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1.22;
+}
+
+.medicine-picker,
+.medicine-date-picker {
+  min-height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  margin-top: 20rpx;
+  border: 1rpx solid #dbe7f3;
+  border-radius: 18rpx;
+  background: #f8fafd;
+  padding: 0 18rpx;
+  box-sizing: border-box;
+}
+
+.medicine-picker__value,
+.medicine-date-picker__value {
+  color: #172033;
+  font-size: 27rpx;
+  font-weight: 850;
+  line-height: 1.3;
+}
+
+.medicine-picker__hint,
+.medicine-date-picker__hint {
+  margin-top: 4rpx;
+  color: #637083;
+  font-size: 25rpx;
+  font-weight: 650;
+  line-height: 1.3;
+}
+
+.medicine-field {
+  margin-top: 22rpx;
+}
+
+.medicine-field text {
+  display: block;
+  color: #344054;
+  font-size: 25rpx;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.medicine-field input {
+  width: 100%;
+  min-height: 88rpx;
+  margin-top: 10rpx;
+  border: 1rpx solid #dbe7f3;
+  border-radius: 17rpx;
+  background: #f8fafd;
+  color: #172033;
+  padding: 0 16rpx;
+  font-size: 26rpx;
+  font-weight: 700;
+}
+
+.medicine-inventory-state {
+  display: flex;
+  align-items: flex-start;
+  gap: 14rpx;
+  margin-top: 20rpx;
+  border: 1rpx solid #dbe7f3;
+  border-radius: 18rpx;
+  background: #f8fafd;
+  padding: 18rpx;
+}
+
+.medicine-inventory-state.is-stocked {
+  border-color: #b8eadc;
+  background: #f7fffc;
+}
+
+.medicine-inventory-state.is-depleted {
+  border-color: #f5d19b;
+  background: #fff9ef;
+}
+
+.medicine-inventory-state.is-unknown {
+  border-color: #dbe7f3;
+  background: #f8fafd;
+}
+
+.medicine-inventory-state__mark {
+  flex: 0 0 auto;
+  width: 40rpx;
+  height: 40rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: #0f9f8f;
+  color: #ffffff;
+  font-size: 24rpx;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.medicine-inventory-state.is-depleted .medicine-inventory-state__mark {
+  background: #d97706;
+}
+
+.medicine-inventory-state.is-unknown .medicine-inventory-state__mark {
+  background: #64748b;
+}
+
+.medicine-inventory-progress {
+  margin-top: 16rpx;
+  border-radius: 14rpx;
+  background: #f1f5f9;
+  padding: 14rpx 16rpx;
+  color: #526174;
+  font-size: 24rpx;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.medicine-inventory-progress.is-pending {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.medicine-inventory-progress.is-failed {
+  background: #fff1f2;
+  color: #be123c;
+}
+
+.medicine-inventory-progress.is-succeeded {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.medicine-inventory-state__copy {
+  min-width: 0;
+  color: #172033;
+  font-size: 25rpx;
+  font-weight: 850;
+  line-height: 1.35;
+}
+
+.medicine-inventory-state__copy text {
+  display: block;
+  margin-top: 4rpx;
+  color: #637083;
+  font-size: 25rpx;
+  font-weight: 650;
+  line-height: 1.45;
+}
+
+.medicine-refill {
+  width: 100%;
+  min-height: 88rpx;
+  margin-top: 14rpx;
+  border: 1rpx solid #bdd3f5;
+  border-radius: 18rpx;
+  background: #edf5ff;
+  color: #1d4ed8;
+  font-size: 25rpx;
+  font-weight: 850;
+}
+
+.medicine-segmented {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8rpx;
+  margin-top: 20rpx;
+  border-radius: 18rpx;
+  background: #eef2f7;
+  padding: 6rpx;
+}
+
+.medicine-segmented__item {
+  min-height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 14rpx;
+  color: #59677b;
+  padding: 0 12rpx;
+  font-size: 25rpx;
+  font-weight: 800;
+  text-align: center;
+}
+
+.medicine-segmented__item.is-active {
+  background: #ffffff;
+  color: #2563eb;
+  box-shadow: 0 2rpx 6rpx rgba(15, 35, 70, 0.08);
+}
+
+.medicine-date-picker.is-filled {
+  border-color: #bdd3f5;
+  background: #f7faff;
+}
+
+.medicine-warning {
+  margin-top: 14rpx;
+  border-radius: 15rpx;
+  background: #fff1f0;
+  color: #b42318;
+  padding: 13rpx 15rpx;
+  font-size: 25rpx;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.medicine-expiry-note {
+  margin-top: 12rpx;
+  color: #637083;
+  font-size: 25rpx;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.medicine-expiry-note.expired {
+  color: #b42318;
+}
+
+.medicine-expiry-note.soon,
+.medicine-expiry-note.urgent,
+.medicine-expiry-note.missing {
+  color: #9a570b;
+}
+
+.medicine-sync-note {
+  min-height: 56rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  margin: 24rpx 8rpx 18rpx;
+  color: #637083;
+  font-size: 25rpx;
+  font-weight: 650;
+  line-height: 1.35;
+}
+
+.medicine-sync-note__dot {
+  flex: 0 0 auto;
+  width: 12rpx;
+  height: 12rpx;
+  border-radius: 50%;
+  background: #f28c28;
+}
+
+.medicine-sync-note__dot.is-online {
+  background: #0f9f8f;
+}
+
+.medicine-submit {
+  width: 100%;
+  min-height: 88rpx;
+  border-radius: 20rpx;
+  background: #2563eb;
+  color: #ffffff;
+  font-size: 28rpx;
+  font-weight: 900;
+  box-shadow: 0 12rpx 24rpx rgba(37, 99, 235, 0.18);
+}
+
+.medicine-reset {
+  width: 100%;
+  min-height: 88rpx;
+  margin-top: 10rpx;
+  background: transparent;
+  color: #637083;
+  font-size: 26rpx;
+  font-weight: 750;
+}
+
+@media (max-width: 360px) {
+  .medicine-slot-card,
+  .medicine-profile-card,
+  .medicine-expiry-card,
+  .medicine-stock-card {
+    padding: 20rpx;
+  }
+
+}

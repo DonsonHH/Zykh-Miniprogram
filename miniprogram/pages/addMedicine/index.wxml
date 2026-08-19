@@ -1,0 +1,163 @@
+<view class="page care-page medicine-editor-page">
+  <app-header
+    title="药品维护"
+    eyebrow=""
+    online="{{device.online}}"
+    status-text="{{initialLoading ? '正在读取' : ''}}"
+    status-hint="{{initialLoading ? '请稍候' : ''}}"
+  />
+
+  <view wx:if="{{initialLoading}}" class="ui-surface ui-loading medicine-editor-loading" aria-label="正在读取仓位药品">
+    <view class="ui-loading__spinner"></view>
+    <view class="ui-loading__text">正在读取仓位药品…</view>
+  </view>
+
+  <view wx:elif="{{loadError}}" class="ui-surface medicine-editor-error" aria-label="仓位药品读取失败">
+    <view class="medicine-editor-error__title">暂时无法读取这个仓位</view>
+    <view class="medicine-editor-error__message">{{loadError}}</view>
+    <button class="medicine-editor-error__retry" bindtap="retryLoad">重新读取仓位</button>
+  </view>
+
+  <block wx:else>
+
+  <view wx:if="{{isStale}}" class="medicine-editor-stale ui-surface" aria-label="仓位数据待刷新">
+    <view class="medicine-editor-stale__copy">{{refreshError}}</view>
+    <button class="medicine-editor-stale__retry" bindtap="retryLoad">重新读取</button>
+  </view>
+
+  <view class="medicine-flow" aria-label="药品维护步骤">
+    <view class="medicine-flow__step {{currentStep === 1 ? 'is-active' : (currentStep > 1 ? 'is-complete' : '')}}">
+      <view class="medicine-flow__number">1</view>
+      <view class="medicine-flow__label">药品 / 仓位</view>
+    </view>
+    <view class="medicine-flow__line {{currentStep > 1 ? 'is-complete' : ''}}"></view>
+    <view class="medicine-flow__step {{currentStep === 2 ? 'is-active' : (currentStep > 2 ? 'is-complete' : '')}}">
+      <view class="medicine-flow__number">2</view>
+      <view class="medicine-flow__label">有效期</view>
+    </view>
+    <view class="medicine-flow__line {{currentStep > 2 ? 'is-complete' : ''}}"></view>
+    <view class="medicine-flow__step {{currentStep === 3 ? 'is-active' : ''}}">
+      <view class="medicine-flow__number">3</view>
+      <view class="medicine-flow__label">库存确认</view>
+    </view>
+  </view>
+
+  <block wx:if="{{currentStep === 1}}">
+  <view class="ui-surface medicine-slot-card">
+    <view class="medicine-card-head">
+      <view>
+        <view class="ui-kicker">第一步</view>
+        <view class="medicine-card-title">选择仓位</view>
+      </view>
+      <view class="ui-status ui-status--notice">{{slots[slotIndex]}}</view>
+    </view>
+    <picker range="{{slots}}" value="{{slotIndex}}" bindchange="onSlotChange">
+      <view class="medicine-picker" hover-class="tap-feedback" hover-stay-time="80">
+        <view>
+          <view class="medicine-picker__value">{{slots[slotIndex]}}</view>
+          <view class="medicine-picker__hint">切换仓位会读取该仓已保存的信息</view>
+        </view>
+        <view class="ui-link">更换 ›</view>
+      </view>
+    </picker>
+  </view>
+
+  <view class="ui-section">
+    <view class="ui-surface medicine-profile-card">
+      <view class="medicine-card-head">
+        <view>
+          <view class="ui-kicker">药品资料</view>
+          <view class="medicine-card-title">{{form.name ? '更新药品信息' : '填写药品信息'}}</view>
+        </view>
+      </view>
+
+      <view class="medicine-field">
+        <text>药品名称</text>
+        <input value="{{form.name}}" data-key="name" bindinput="onInput" placeholder="例如：感冒灵颗粒" />
+      </view>
+      <view class="medicine-field">
+        <text>规格 / 包装</text>
+        <input value="{{form.spec}}" data-key="spec" bindinput="onInput" placeholder="例如：10g × 9 袋" />
+      </view>
+    </view>
+  </view>
+
+  <view class="medicine-flow-actions medicine-flow-actions--next">
+    <button class="medicine-flow-button medicine-flow-button--primary" bindtap="nextStep" hover-class="tap-feedback" hover-stay-time="80">下一步：填写有效期</button>
+  </view>
+  </block>
+
+  <block wx:elif="{{currentStep === 2}}">
+  <view class="ui-section">
+    <view class="ui-surface medicine-expiry-card">
+      <view class="medicine-card-head">
+        <view>
+          <view class="ui-kicker">有效期</view>
+          <view class="medicine-card-title">按包装标注填写</view>
+        </view>
+        <view class="ui-status {{expiryPreview.expiryClass === 'expired' ? 'ui-status--danger' : (expiryPreview.expiryClass === 'valid' ? 'ui-status--good' : 'ui-status--warn')}}">{{form.expiryPrecision === 'day' ? '精确到日' : '按月末'}}</view>
+      </view>
+
+      <view class="medicine-segmented" aria-label="有效期精度">
+        <view class="medicine-segmented__item {{form.expiryPrecision === 'month' ? 'is-active' : ''}}" data-precision="month" bindtap="onExpiryPrecisionChange" hover-class="tap-feedback" hover-stay-time="80">包装仅标月份</view>
+        <view class="medicine-segmented__item {{form.expiryPrecision === 'day' ? 'is-active' : ''}}" data-precision="day" bindtap="onExpiryPrecisionChange" hover-class="tap-feedback" hover-stay-time="80">包装标具体日期</view>
+      </view>
+
+      <picker mode="date" fields="{{expiryPickerFields}}" value="{{form.expireDate}}" bindchange="onDateChange">
+        <view class="medicine-date-picker {{form.expireDate ? 'is-filled' : ''}}" hover-class="tap-feedback" hover-stay-time="80">
+          <view>
+            <view class="medicine-date-picker__value">{{form.expireDate || (form.expiryPrecision === 'day' ? '选择有效期日期' : '选择有效期月份')}}</view>
+            <view class="medicine-date-picker__hint">{{form.expireDate ? expiryPreview.expiryHint : '保存前需要登记有效期'}}</view>
+          </view>
+          <view class="ui-link">选择 ›</view>
+        </view>
+      </picker>
+
+      <view wx:if="{{expiryConflict}}" class="medicine-warning">药箱回传的有效期不一致，请重新选择后再提交。</view>
+      <view wx:if="{{form.expireDate}}" class="medicine-expiry-note {{expiryPreview.expiryClass}}">{{form.expiryPrecision === 'day' ? '按所选日期计算临期和到期提醒' : '仅标注月份时，按该月最后一天计算'}}</view>
+    </view>
+  </view>
+
+  <view class="medicine-flow-actions">
+    <button class="medicine-flow-button" bindtap="previousStep" hover-class="tap-feedback" hover-stay-time="80">上一步</button>
+    <button class="medicine-flow-button medicine-flow-button--primary" bindtap="nextStep" hover-class="tap-feedback" hover-stay-time="80">下一步：确认库存</button>
+  </view>
+  </block>
+
+  <block wx:else>
+  <view class="ui-section">
+    <view class="ui-surface medicine-stock-card">
+      <view class="medicine-card-head">
+        <view>
+          <view class="ui-kicker">药箱库存</view>
+          <view class="medicine-card-title">{{inventoryState.title}}</view>
+        </view>
+      </view>
+      <view class="medicine-inventory-state {{inventoryState.isInventoryUnknown ? 'is-unknown' : (inventoryState.isDepleted ? 'is-depleted' : 'is-stocked')}}">
+        <view class="medicine-inventory-state__mark">{{inventoryState.isInventoryUnknown ? '?' : (inventoryState.isDepleted ? '!' : '✓')}}</view>
+        <view class="medicine-inventory-state__copy">
+          <view>{{inventoryState.isInventoryUnknown ? '库存待确认' : (inventoryState.isDepleted ? '待补药' : '仓内有药')}}</view>
+          <text>{{inventoryState.hint}}</text>
+        </view>
+      </view>
+      <view wx:if="{{inventoryUpdateStatus === 'pending'}}" class="medicine-inventory-progress is-pending">更新中，等待药箱确认库存状态。</view>
+      <view wx:elif="{{inventoryUpdateStatus === 'failed'}}" class="medicine-inventory-progress is-failed">更新失败，远端库存事实没有改变，可重新提交。</view>
+      <view wx:elif="{{inventoryUpdateStatus === 'succeeded'}}" class="medicine-inventory-progress is-succeeded">药箱已确认新的库存状态。</view>
+      <view wx:elif="{{inventoryIntent === 'STOCKED'}}" class="medicine-inventory-progress">已记录补药；提交后仍以药箱同步结果为准。</view>
+      <button wx:if="{{(inventoryState.isDepleted || inventoryState.isInventoryUnknown) && baseMedicine.name && inventoryIntent !== 'STOCKED'}}" class="medicine-refill" bindtap="markRefilled" hover-class="tap-feedback" hover-stay-time="80">已补入药品</button>
+    </view>
+  </view>
+
+  <view class="medicine-sync-note">
+    <view class="medicine-sync-note__dot {{device.online ? 'is-online' : ''}}"></view>
+    <text>{{device.online ? '已提交后由药箱处理，完成后自动刷新。' : '已提交的信息会在药箱上线后处理。'}}</text>
+  </view>
+
+  <view class="medicine-flow-actions">
+    <button class="medicine-flow-button" bindtap="previousStep" disabled="{{saving}}" hover-class="tap-feedback" hover-stay-time="80">上一步</button>
+    <button class="medicine-submit" bindtap="submit" disabled="{{saving || isStale || inventoryUpdateStatus === 'pending'}}">{{saving ? '正在提交…' : (isStale ? '重新读取后提交' : (inventoryUpdateStatus === 'pending' ? '库存更新中' : (inventoryUpdateStatus === 'failed' ? '重新提交补药更新' : (form.name ? '提交更新' : '登记药品'))))}}</button>
+  </view>
+  <button class="medicine-reset" bindtap="clearForm" disabled="{{saving}}">重置未保存修改</button>
+  </block>
+  </block>
+</view>

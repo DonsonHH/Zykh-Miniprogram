@@ -1,0 +1,162 @@
+<view class="care-screen">
+  <app-header
+    title="{{model.title}}"
+    eyebrow=""
+    online="{{model.online}}"
+    show-status="{{model.showStatus}}"
+  />
+
+  <view wx:if="{{model.phase.kind !== 'ready'}}" class="care-phase care-surface">
+    <view wx:if="{{model.phase.kind === 'loading'}}" class="care-spinner"></view>
+    <view class="care-phase__title">{{model.phase.kind === 'error' ? '暂时无法显示' : (model.phase.kind === 'empty' ? '暂无内容' : '正在加载')}}</view>
+    <view class="care-phase__message">{{model.phase.message}}</view>
+    <button
+      wx:if="{{model.phase.action}}"
+      class="care-primary care-primary--phase"
+      disabled="{{model.phase.action.disabled}}"
+      bindtap="onPhaseAction"
+      hover-class="care-pressed"
+      hover-stay-time="80"
+    >
+      <text>{{model.phase.action.label}}</text>
+      <text class="care-primary__arrow">›</text>
+    </button>
+  </view>
+
+  <block wx:else>
+    <view
+      class="care-focus care-focus--{{model.focus.state ? model.focus.state.kind : 'muted'}} {{model.focus.activation === 'surface' ? 'is-actionable' : ''}} {{model.focus.activation === 'surface' && model.focus.action.disabled ? 'is-disabled' : ''}}"
+      aria-role="{{model.focus.activation === 'surface' ? 'button' : ''}}"
+      aria-label="{{model.focus.ariaLabel}}"
+      aria-disabled="{{model.focus.activation === 'surface' ? model.focus.action.disabled : ''}}"
+      bindtap="onFocusOpen"
+      hover-class="{{model.focus.activation === 'surface' && !model.focus.action.disabled ? 'care-pressed' : ''}}"
+      hover-stay-time="80"
+    >
+      <view class="care-focus__top">
+        <view wx:if="{{model.focus.eyebrow}}" class="care-eyebrow">{{model.focus.eyebrow}}</view>
+        <view class="care-focus__meta">
+          <view wx:if="{{model.focus.state}}" class="care-state care-state--{{model.focus.state.kind}}">{{model.focus.state.label}}</view>
+          <view wx:if="{{model.focus.activation === 'surface'}}" class="care-focus__chevron" aria-hidden="true">›</view>
+        </view>
+      </view>
+      <view class="care-focus__title">{{model.focus.title}}</view>
+      <view wx:if="{{model.focus.supporting}}" class="care-focus__supporting">{{model.focus.supporting}}</view>
+      <button
+        wx:if="{{model.focus.action && model.focus.activation === 'button'}}"
+        class="care-primary"
+        disabled="{{model.focus.action.disabled}}"
+        bindtap="onFocusAction"
+        hover-class="care-pressed"
+        hover-stay-time="80"
+      >
+        <text>{{model.focus.action.label}}</text>
+        <text class="care-primary__arrow">›</text>
+      </button>
+    </view>
+
+    <view wx:if="{{model.overview.length}}" class="care-facts care-facts--{{model.overview.length}} care-surface">
+      <view
+        wx:for="{{model.overview}}"
+        wx:key="key"
+        class="care-fact {{item.action ? 'is-actionable' : ''}} care-fact--{{item.state ? item.state.kind : 'muted'}}"
+        data-index="{{index}}"
+        aria-role="{{item.action ? 'button' : ''}}"
+        aria-label="{{item.ariaLabel}}"
+        bindtap="onFactAction"
+        hover-class="{{item.action ? 'care-pressed' : ''}}"
+        hover-stay-time="80"
+      >
+        <view class="care-fact__value">{{item.value}}<text wx:if="{{item.unit}}">{{item.unit}}</text></view>
+        <view class="care-fact__label">{{item.label}}</view>
+        <view wx:if="{{item.action}}" class="care-fact__arrow">›</view>
+      </view>
+    </view>
+
+    <view
+      wx:for="{{model.sections}}"
+      wx:for-item="section"
+      wx:for-index="sectionIndex"
+      wx:key="key"
+      class="care-section care-section--{{section.intent}}"
+    >
+      <view wx:if="{{section.title || section.more}}" class="care-section__head">
+        <view class="care-section__copy">
+          <view wx:if="{{section.title}}" class="care-section__title">{{section.title}}</view>
+          <view wx:if="{{section.supporting}}" class="care-section__supporting">{{section.supporting}}</view>
+        </view>
+        <view
+          wx:if="{{section.more}}"
+          class="care-link {{section.more.disabled ? 'is-disabled' : ''}}"
+          data-section-index="{{sectionIndex}}"
+          aria-role="button"
+          aria-label="{{section.more.label}}"
+          aria-disabled="{{section.more.disabled}}"
+          bindtap="onMoreAction"
+          hover-class="{{section.more.disabled ? 'none' : 'care-pressed'}}"
+          hover-stay-time="80"
+        >{{section.more.label}} ›</view>
+      </view>
+
+      <view wx:if="{{section.filters.length}}" class="care-filters" aria-role="tablist" aria-label="内容筛选">
+        <view
+          wx:for="{{section.filters}}"
+          wx:for-item="filter"
+          wx:for-index="filterIndex"
+          wx:key="key"
+          class="care-filter {{filter.active ? 'is-active' : ''}}"
+          data-section-index="{{sectionIndex}}"
+          data-filter-index="{{filterIndex}}"
+          aria-role="tab"
+          aria-label="{{filter.ariaLabel}}"
+          aria-selected="{{filter.active}}"
+          bindtap="onFilterAction"
+          hover-class="care-pressed"
+          hover-stay-time="80"
+        >{{filter.label}}</view>
+      </view>
+
+      <view wx:if="{{section.items.length}}" class="care-list care-surface">
+        <view
+          wx:for="{{section.items}}"
+          wx:for-item="entry"
+          wx:for-index="itemIndex"
+          wx:key="key"
+          class="care-item care-item--{{section.intent}} {{entry.action ? 'is-actionable' : ''}}"
+          data-section-index="{{sectionIndex}}"
+          data-item-index="{{itemIndex}}"
+          aria-role="{{entry.action ? 'button' : ''}}"
+          aria-label="{{entry.ariaLabel}}"
+          bindtap="onItemAction"
+          hover-class="{{entry.action ? 'care-pressed' : ''}}"
+          hover-stay-time="80"
+        >
+          <view class="care-item__symbol care-item__symbol--{{entry.state ? entry.state.kind : 'muted'}}">{{entry.symbol}}</view>
+          <view class="care-item__copy">
+            <view class="care-item__top">
+              <view class="care-item__title">{{entry.title}}</view>
+              <view wx:if="{{entry.state}}" class="care-state care-state--{{entry.state.kind}}">{{entry.state.label}}</view>
+            </view>
+            <view wx:if="{{entry.supporting}}" class="care-item__supporting">{{entry.supporting}}</view>
+            <view wx:if="{{entry.meta}}" class="care-item__meta">{{entry.meta}}</view>
+          </view>
+          <view wx:if="{{entry.action}}" class="care-chevron">›</view>
+        </view>
+      </view>
+      <view wx:else class="care-empty care-surface">{{section.empty}}</view>
+    </view>
+
+    <view
+      wx:if="{{model.detailAction}}"
+      class="care-detail-action care-surface"
+      aria-role="button"
+      aria-label="{{model.detailAction.label}}"
+      bindtap="onDetailAction"
+      hover-class="care-pressed"
+      hover-stay-time="80"
+    >
+      <text>{{model.detailAction.label}}</text>
+      <text>›</text>
+    </view>
+  </block>
+</view>

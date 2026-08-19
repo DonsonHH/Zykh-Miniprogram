@@ -1,0 +1,47 @@
+.home-page {
+  padding-top: 20rpx;
+}
+
+.home-detail-list .ui-list-row {
+  align-items: flex-start;
+}
+
+.home-detail-list .ui-row-title,
+.home-detail-list .ui-row-subtitle {
+  display: -webkit-box;
+  overflow: hidden;
+  text-overflow: initial;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.priority-action {
+  flex: 0 0 auto;
+  min-height: 52rpx;
+  display: flex;
+  align-items: center;
+  border-radius: 14rpx;
+  background: #f2f6fb;
+  color: #2563eb;
+  padding: 0 14rpx;
+  font-size: 25rpx;
+  font-weight: 850;
+}
+
+.timeline-time {
+  flex: 0 0 auto;
+  min-width: 136rpx;
+  color: #637083;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.35;
+  text-align: right;
+}
+
+.home-sheet-scroll {
+  max-height: 62vh;
+  box-sizing: border-box;
+  padding: 18rpx 28rpx calc(28rpx + env(safe-area-inset-bottom));
+}

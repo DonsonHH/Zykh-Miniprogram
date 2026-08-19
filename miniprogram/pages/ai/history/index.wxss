@@ -1,0 +1,14 @@
+@import "../../../styles/inquiry-detail.wxss";
+
+.inquiry-history-page {
+  padding-top: 20rpx;
+}
+
+.inquiry-history-boundary {
+  margin-bottom: 18rpx;
+  padding: 18rpx 22rpx;
+  color: #59677b;
+  font-size: 24rpx;
+  font-weight: 650;
+  line-height: 1.5;
+}

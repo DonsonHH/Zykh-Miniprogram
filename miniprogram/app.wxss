@@ -1,0 +1,42 @@
+@import "./styles/care-ui.wxss";
+
+page {
+  background: #f6f9fc;
+  color: #172033;
+  font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-size: 28rpx;
+  line-height: 1.5;
+}
+
+button {
+  margin: 0;
+  box-sizing: border-box;
+  transition: transform 100ms ease-out, opacity 100ms ease-out, box-shadow 100ms ease-out;
+}
+
+button::after {
+  border: none;
+}
+
+button:active {
+  transform: scale(0.97);
+}
+
+button[disabled]:active {
+  transform: none;
+}
+
+.tap-feedback {
+  transform: scale(0.985);
+  opacity: 0.86;
+}
+
+input,
+textarea {
+  box-sizing: border-box;
+}
+
+.page {
+  min-height: 100vh;
+  box-sizing: border-box;
+}

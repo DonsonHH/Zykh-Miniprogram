@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "家人和药箱",
+  "usingComponents": {
+    "care-screen": "/components/careScreen/index"
+  }
+}

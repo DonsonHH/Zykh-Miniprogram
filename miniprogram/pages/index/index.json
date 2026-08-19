@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "智药康护",
+  "usingComponents": {
+    "care-screen": "/components/careScreen/index"
+  }
+}

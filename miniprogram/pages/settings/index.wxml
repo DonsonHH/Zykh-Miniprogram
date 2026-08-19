@@ -1,0 +1,162 @@
+<view class="page care-page family-page">
+  <care-screen model="{{carePage}}" bind:action="onCarePageAction" />
+
+  <view wx:if="{{detailVisible}}" class="ui-sheet-mask" bindtap="closeDetail"></view>
+  <view wx:if="{{detailVisible}}" class="ui-sheet family-detail-sheet" catchtap="noop">
+    <view class="ui-sheet-grip"></view>
+    <view class="ui-sheet-head">
+      <view class="ui-sheet-title">{{detailTitle}}</view>
+      <view class="ui-sheet-close" bindtap="closeDetail" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="关闭{{detailTitle}}">关闭</view>
+    </view>
+    <scroll-view scroll-y class="family-detail-sheet__scroll">
+      <block wx:if="{{detailMode === 'family'}}">
+        <view wx:if="{{detailMembers.length}}" class="ui-surface ui-list family-detail-members">
+          <block wx:for="{{detailMembers}}" wx:key="viewKey">
+            <view
+              wx:if="{{item.personId}}"
+              class="family-member is-actionable"
+              data-person-id="{{item.personId}}"
+              data-persona-generation="{{item.personaGeneration}}"
+              data-person-name="{{item.name}}"
+              bindtap="openMemberDetail"
+              hover-class="tap-feedback"
+              hover-stay-time="80"
+              aria-role="button"
+              aria-label="{{'查看' + item.name + '的照护详情，' + item.careStatusText + '，' + (item.unreadSafetyText || '没有未读安全提醒')}}"
+            >
+              <view class="family-member__avatar">{{item.initial}}</view>
+              <view class="family-member__copy">
+                <view class="family-member__top">
+                  <view class="family-member__name">{{item.name}}</view>
+                  <view class="ui-status {{item.careTone === 'danger' ? 'ui-status--danger' : (item.careTone === 'warn' ? 'ui-status--warn' : 'ui-status--good')}}">{{item.careStatusText}}</view>
+                </view>
+                <view wx:if="{{item.profileText}}" class="family-member__profile">{{item.profileText}}</view>
+                <view wx:if="{{item.safetyProfileText}}" class="family-member__profile">{{item.safetyProfileText}}</view>
+                <view wx:if="{{item.unreadSafetyText}}" class="family-member__profile">{{item.unreadSafetyText}}</view>
+                <view wx:if="{{item.latestSafetyText}}" class="family-member__next">最近安全：{{item.latestSafetyText}}</view>
+                <view wx:if="{{item.pendingCount}}" class="family-member__next has-pending">下一项：{{item.nextCareText}}</view>
+              </view>
+            </view>
+            <view wx:else class="family-member">
+              <view class="family-member__avatar">{{item.initial}}</view>
+              <view class="family-member__copy">
+                <view class="family-member__top">
+                  <view class="family-member__name">{{item.name}}</view>
+                  <view class="ui-status {{item.careTone === 'danger' ? 'ui-status--danger' : (item.careTone === 'warn' ? 'ui-status--warn' : 'ui-status--good')}}">{{item.careStatusText}}</view>
+                </view>
+                <view wx:if="{{item.profileText}}" class="family-member__profile">{{item.profileText}}</view>
+                <view wx:if="{{item.safetyProfileText}}" class="family-member__profile">{{item.safetyProfileText}}</view>
+                <view wx:if="{{item.unreadSafetyText}}" class="family-member__profile">{{item.unreadSafetyText}}</view>
+                <view wx:if="{{item.latestSafetyText}}" class="family-member__next">最近安全：{{item.latestSafetyText}}</view>
+                <view wx:if="{{item.pendingCount}}" class="family-member__next has-pending">下一项：{{item.nextCareText}}</view>
+              </view>
+            </view>
+          </block>
+        </view>
+        <view wx:else class="ui-empty">暂无家人资料。</view>
+      </block>
+
+      <block wx:elif="{{detailMode === 'device'}}">
+        <view wx:if="{{detailLines.length}}" class="family-detail-lines">
+          <view wx:for="{{detailLines}}" wx:key="label" class="family-detail-line">
+            <view class="family-detail-line__label">{{item.label}}</view>
+            <view class="family-detail-line__value">{{item.value}}</view>
+          </view>
+        </view>
+
+        <view wx:if="{{deviceSessionMode === 'membership'}}" class="device-access-section">
+          <view class="device-access-title">我的药箱</view>
+          <view class="device-access-note">这里只显示当前微信账号已获授权的药箱。</view>
+          <view wx:if="{{authorizedDevices.length}}" class="authorized-device-list">
+            <view
+              wx:for="{{authorizedDevices}}"
+              wx:key="deviceId"
+              class="authorized-device-row {{item.selected ? 'is-selected' : ''}}"
+              data-device-id="{{item.deviceId}}"
+              bindtap="selectAuthorizedDevice"
+              hover-class="tap-feedback"
+              hover-stay-time="80"
+              aria-role="button"
+              aria-selected="{{item.selected}}"
+              aria-label="{{'选择' + item.name + '，药箱编号' + item.deviceId + (item.selected ? '，当前已选择' : '')}}"
+            >
+              <view class="authorized-device-row__copy">
+                <view class="authorized-device-row__name">{{item.name || '家庭药箱'}}</view>
+                <view class="authorized-device-row__meta">{{item.deviceId}}<text wx:if="{{item.role}}"> · {{item.role}}</text></view>
+              </view>
+              <view class="authorized-device-row__state">{{item.selected ? '当前' : '选择'}}</view>
+            </view>
+          </view>
+          <view wx:else class="device-access-message">{{deviceSessionMessage || '当前账号还没有获授权的药箱。'}}</view>
+
+          <view wx:if="{{canPair}}" class="device-pairing-panel">
+            <view class="device-pairing-title">使用一次性配对码</view>
+            <view class="device-access-note">配对成功后，新药箱会出现在上方授权列表中。</view>
+            <input
+              value="{{pairingCode}}"
+              bindinput="onPairingCodeInput"
+              placeholder="输入一次性配对码"
+              maxlength="256"
+              disabled="{{pairingBusy}}"
+              aria-label="一次性配对码"
+            />
+            <view wx:if="{{pairingMessage}}" class="device-pairing-message {{pairingPhase === 'error' ? 'is-error' : ''}}">{{pairingMessage}}</view>
+            <view
+              class="device-action device-action--primary {{pairingBusy ? 'is-disabled' : ''}}"
+              bindtap="redeemDevicePairingCode"
+              hover-class="tap-feedback"
+              hover-stay-time="80"
+              aria-role="button"
+              aria-label="{{pairingBusy ? '正在配对药箱' : '确认一次性配对码并配对药箱'}}"
+              aria-disabled="{{pairingBusy}}"
+            >{{pairingBusy ? '正在配对…' : '配对药箱'}}</view>
+          </view>
+          <view
+            wx:if="{{deviceSessionAvailability === 'error' || deviceSessionAvailability === 'forbidden' || deviceSessionAvailability === 'pairing-unavailable'}}"
+            class="device-action device-access-refresh"
+            bindtap="refreshDeviceSession"
+            hover-class="tap-feedback"
+            hover-stay-time="80"
+            aria-role="button"
+            aria-label="重新读取授权药箱"
+          >重新读取授权药箱</view>
+        </view>
+
+        <view wx:elif="{{deviceSessionMode === 'legacy' && deviceSessionAvailability === 'unsupported'}}" class="device-access-section">
+          <view class="device-access-title">旧版云端：切换药箱编号</view>
+          <view class="device-access-warning">手动切换只改变当前读取的药箱编号，不代表账号已绑定。</view>
+          <view class="device-detail-actions">
+            <view class="device-action" bindtap="toggleBindForm" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="更换绑定药箱" aria-expanded="{{showBindForm}}">更换药箱编号</view>
+          </view>
+          <view wx:if="{{showBindForm}}" class="device-bind-panel">
+            <input value="{{bindValue}}" bindinput="onBindInput" placeholder="输入旧版药箱编号" aria-label="旧版药箱编号" />
+            <view class="device-bind-panel__actions">
+              <view class="device-action device-action--primary" bindtap="bindDevice" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="确认切换药箱">确认切换</view>
+              <view class="device-action" bindtap="toggleBindForm" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="取消更换药箱">取消</view>
+            </view>
+          </view>
+        </view>
+
+        <view wx:else class="device-access-section">
+          <view class="device-access-title">我的药箱</view>
+          <view class="device-access-message">{{deviceSessionMessage || '暂时无法确认账号可访问的药箱。'}}</view>
+          <view class="device-action" bindtap="refreshDeviceSession" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="重新读取授权药箱">重新读取授权药箱</view>
+        </view>
+
+        <view wx:if="{{deviceAccessReady}}" class="device-detail-actions device-detail-actions--single">
+          <view class="device-action" bindtap="testVoiceReminder" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="测试药箱语音提醒">测试语音提醒</view>
+        </view>
+        <view wx:if="{{deviceAccessReady}}" class="family-detail-link" bindtap="showCommandDetails" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="查看协同日志">查看协同日志 ›</view>
+      </block>
+
+      <block wx:else>
+        <view wx:if="{{detailMode === 'commands'}}" class="family-detail-back" bindtap="showDeviceDetails" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="返回药箱管理">‹ 返回药箱管理</view>
+        <view wx:if="{{detailMode === 'todayCare' && !detailLines.length}}" class="ui-empty">暂无今日照护计划。</view>
+        <view wx:for="{{detailLines}}" wx:key="label" class="family-detail-line">
+          <view class="family-detail-line__label">{{item.label}}</view>
+          <view class="family-detail-line__value">{{item.value}}</view>
+        </view>
+      </block>
+    </scroll-view>
+  </view>
+</view>

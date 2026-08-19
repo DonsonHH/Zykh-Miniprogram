@@ -1,0 +1,54 @@
+<view class="page care-page home-page">
+  <care-screen model="{{carePage}}" bind:action="onCarePageAction" />
+
+  <view wx:if="{{detailVisible}}" class="ui-sheet-mask" bindtap="closeDetail"></view>
+  <view wx:if="{{detailVisible}}" class="ui-sheet" catchtap="noop">
+    <view class="ui-sheet-grip"></view>
+    <view class="ui-sheet-head">
+      <view class="ui-sheet-title">{{detailTitle}}</view>
+      <view class="ui-sheet-close" bindtap="closeDetail" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="关闭{{detailTitle}}">关闭</view>
+    </view>
+
+    <scroll-view scroll-y class="home-sheet-scroll">
+      <block wx:if="{{detailMode == 'todo'}}">
+        <view wx:if="{{todoItems.length}}" class="ui-list home-detail-list">
+          <view
+            wx:for="{{todoItems}}"
+            wx:key="id"
+            class="ui-list-row"
+            data-action="{{item.action}}"
+            data-plan-key="{{item.planKey}}"
+            data-slot="{{item.slot}}"
+            data-event-id="{{item.eventId}}"
+            bindtap="handleDetailItem"
+            hover-class="tap-feedback"
+            hover-stay-time="80"
+            aria-role="button"
+            aria-label="{{item.title}}，{{item.desc}}，{{item.actionLabel}}"
+          >
+            <view class="ui-row-mark {{item.level === 'bad' ? 'ui-row-mark--danger' : (item.level === 'warn' ? 'ui-row-mark--warn' : 'ui-row-mark--good')}}"></view>
+            <view class="ui-row-copy">
+              <view class="ui-row-title">{{item.title}}</view>
+              <view class="ui-row-subtitle">{{item.desc}}</view>
+            </view>
+            <view class="priority-action">{{item.actionLabel}}</view>
+          </view>
+        </view>
+        <view wx:else class="ui-empty">今天没有待处理事项。</view>
+      </block>
+
+      <block wx:else>
+        <view wx:if="{{timeline.length}}" class="ui-list home-detail-list">
+          <view wx:for="{{timeline}}" wx:key="id" class="ui-list-row">
+            <view class="timeline-time">{{item.time || '--:--'}}</view>
+            <view class="ui-row-copy">
+              <view class="ui-row-title">{{item.title}}</view>
+              <view class="ui-row-subtitle">{{item.desc || '已同步到照护记录'}}</view>
+            </view>
+          </view>
+        </view>
+        <view wx:else class="ui-empty">暂无近期记录。</view>
+      </block>
+    </scroll-view>
+  </view>
+</view>

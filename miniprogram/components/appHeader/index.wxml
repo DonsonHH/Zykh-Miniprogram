@@ -1,0 +1,26 @@
+<view class="app-header {{compact ? 'is-compact' : ''}}">
+  <view class="app-header__topline">
+    <view class="app-header__brand">
+      <view class="app-header__brand-mark">
+        <image src="/images/brand-mark.png" mode="aspectFit"></image>
+      </view>
+      <view class="app-header__brand-copy">
+        <text>智药康护</text>
+        <label wx:if="{{eyebrow}}">{{eyebrow}}</label>
+      </view>
+    </view>
+
+    <view wx:if="{{showStatus}}" class="app-header__status {{online ? 'is-online' : 'is-offline'}}">
+      <view class="app-header__dot"></view>
+      <view class="app-header__status-copy">
+        <text>{{statusText || (online ? '药箱在线' : '等待药箱连接')}}</text>
+        <label>{{statusHint || (online ? '同步正常' : '可离线查看')}}</label>
+      </view>
+    </view>
+  </view>
+
+  <view class="app-header__page-copy">
+    <view class="app-header__title">{{title}}</view>
+    <view wx:if="{{subtitle}}" class="app-header__subtitle">{{subtitle}}</view>
+  </view>
+</view>

@@ -1,0 +1,79 @@
+<view class="page care-page medicine-list-page">
+  <app-header
+    title="药品清单"
+    eyebrow=""
+    subtitle=""
+    online="{{device.online}}"
+    status-text="{{initialLoading ? '正在读取' : ''}}"
+    status-hint="{{initialLoading ? '请稍候' : ''}}"
+  />
+
+  <view wx:if="{{initialLoading}}" class="ui-surface ui-loading medicine-list-loading">
+    <view class="ui-loading__spinner"></view>
+    <view class="ui-loading__text">正在读取药品清单…</view>
+  </view>
+  <view wx:elif="{{loadError}}" class="ui-surface medicine-list-error" aria-label="药品清单读取失败">
+    <view class="medicine-list-error__title">暂时无法读取药品</view>
+    <view class="medicine-list-error__message">{{loadError}}</view>
+    <button class="medicine-list-error__retry" bindtap="retryLoad" aria-label="重新读取药品清单">重新读取药品</button>
+  </view>
+  <block wx:else>
+  <view wx:if="{{isStale}}" class="medicine-list-stale ui-surface" aria-label="药品数据待刷新">
+    <view class="medicine-list-stale__copy">{{refreshError}}</view>
+    <button class="medicine-list-stale__retry" bindtap="retryLoad">重新读取</button>
+  </view>
+  <view class="cabinet-list-summary ui-surface ui-surface--raised">
+    <view>
+      <view class="cabinet-list-summary__title">{{viewSlots.length}} 种药品</view>
+    </view>
+    <button wx:if="{{primarySlot}}" class="cabinet-primary" bindtap="goAddMedicine" aria-label="登记{{primarySlot}}号仓药品">登记 {{primarySlot}} 号仓</button>
+  </view>
+
+  <view class="cabinet-tools ui-surface">
+    <view class="cabinet-search">
+      <text class="cabinet-search__icon">⌕</text>
+      <input value="{{keyword}}" bindinput="onSearch" placeholder="搜索药品、规格或仓位" aria-label="搜索药品、规格或仓位" />
+    </view>
+    <scroll-view class="cabinet-filter-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+      <view class="cabinet-filter-row" aria-role="tablist" aria-label="药品筛选">
+        <view class="cabinet-filter {{filter == 'all' ? 'is-active' : ''}}" data-filter="all" bindtap="setFilter" hover-class="tap-feedback" hover-stay-time="80" aria-role="tab" aria-label="显示全部药品" aria-selected="{{filter == 'all'}}">全部</view>
+        <view class="cabinet-filter {{filter == 'expiring' ? 'is-active is-warn' : ''}}" data-filter="expiring" bindtap="setFilter" hover-class="tap-feedback" hover-stay-time="80" aria-role="tab" aria-label="只显示临期药品" aria-selected="{{filter == 'expiring'}}">临期</view>
+        <view class="cabinet-filter {{filter == 'expired' ? 'is-active is-danger' : ''}}" data-filter="expired" bindtap="setFilter" hover-class="tap-feedback" hover-stay-time="80" aria-role="tab" aria-label="只显示已过期药品" aria-selected="{{filter == 'expired'}}">已过期</view>
+        <view class="cabinet-filter {{filter == 'missing' ? 'is-active is-notice' : ''}}" data-filter="missing" bindtap="setFilter" hover-class="tap-feedback" hover-stay-time="80" aria-role="tab" aria-label="只显示待补有效期药品" aria-selected="{{filter == 'missing'}}">待补有效期</view>
+        <view class="cabinet-filter {{filter == 'depleted' ? 'is-active is-warn' : ''}}" data-filter="depleted" bindtap="setFilter" hover-class="tap-feedback" hover-stay-time="80" aria-role="tab" aria-label="只显示待补药药品" aria-selected="{{filter == 'depleted'}}">待补药</view>
+      </view>
+    </scroll-view>
+  </view>
+
+  <view class="ui-section medicine-list-section">
+    <view wx:if="{{viewSlots.length}}" class="ui-surface ui-list cabinet-list">
+      <view
+        wx:for="{{viewSlots}}"
+        wx:key="slot"
+        class="ui-list-row cabinet-row"
+        data-slot="{{item.slot}}"
+        bindtap="selectSlot"
+        hover-class="tap-feedback"
+        hover-stay-time="80"
+        aria-role="button"
+        aria-label="维护{{item.slot}}号仓，{{item.name}}，{{item.stockText}}，{{item.isDepleted ? '待补药' : item.expiryHint}}"
+      >
+        <view class="ui-row-mark {{item.isInventoryUnknown ? 'ui-row-mark--notice' : (item.isDepleted ? 'ui-row-mark--warn' : (item.statusClass === 'expired' ? 'ui-row-mark--danger' : (item.statusClass === 'valid' ? 'ui-row-mark--good' : 'ui-row-mark--warn')))}}"></view>
+        <view class="cabinet-slot">{{item.slot}}</view>
+        <view class="ui-row-copy">
+          <view class="cabinet-row__headline">
+            <view class="ui-row-title">{{item.name}}</view>
+          </view>
+          <view class="ui-row-subtitle">{{item.spec || '规格待补充'}} · {{item.stockText}}</view>
+        </view>
+        <view class="cabinet-expiry">
+          <view class="ui-status {{item.isInventoryUnknown ? 'ui-status--muted' : (item.isDepleted ? 'ui-status--warn' : (item.statusClass === 'expired' ? 'ui-status--danger' : (item.statusClass === 'valid' ? 'ui-status--good' : (item.statusClass === 'missing' ? 'ui-status--notice' : 'ui-status--warn'))))}}">{{item.isInventoryUnknown ? '库存待确认' : (item.isDepleted ? '待补药' : item.expiryHint)}}</view>
+          <view class="cabinet-expiry__date">{{item.expiryLabel || '未登记'}}</view>
+        </view>
+        <view class="ui-chevron">›</view>
+      </view>
+    </view>
+    <view wx:else class="ui-surface ui-empty">{{emptyText}}</view>
+  </view>
+  </block>
+</view>

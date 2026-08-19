@@ -1,0 +1,170 @@
+.app-header {
+  margin-bottom: 30rpx;
+}
+
+.app-header.is-compact {
+  margin-bottom: 20rpx;
+}
+
+.app-header.is-compact .app-header__brand-mark {
+  flex-basis: 64rpx;
+  width: 64rpx;
+  height: 64rpx;
+  border-radius: 18rpx;
+}
+
+.app-header.is-compact .app-header__brand-mark image {
+  width: 58rpx;
+  height: 58rpx;
+}
+
+.app-header.is-compact .app-header__page-copy {
+  margin-top: 16rpx;
+}
+
+.app-header.is-compact .app-header__title {
+  font-size: 40rpx;
+}
+
+.app-header.is-compact .app-header__subtitle {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
+}
+
+.app-header__topline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 22rpx;
+}
+
+.app-header__brand {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14rpx;
+}
+
+.app-header__brand-mark {
+  flex: 0 0 68rpx;
+  width: 68rpx;
+  height: 68rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border: 1rpx solid #cfe0fb;
+  border-radius: 20rpx;
+  background: #eaf2ff;
+}
+
+.app-header__brand-mark image {
+  width: 62rpx;
+  height: 62rpx;
+}
+
+.app-header__brand-copy {
+  min-width: 0;
+}
+
+.app-header__brand-copy text,
+.app-header__brand-copy label {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-header__brand-copy text {
+  color: #172033;
+  font-size: 30rpx;
+  font-weight: 900;
+  letter-spacing: -0.5rpx;
+  line-height: 1.12;
+}
+
+.app-header__brand-copy label {
+  margin-top: 6rpx;
+  color: #637083;
+  font-size: 24rpx;
+  font-weight: 700;
+  letter-spacing: 1rpx;
+}
+
+.app-header__status {
+  flex: 0 0 auto;
+  min-height: 58rpx;
+  display: flex;
+  align-items: center;
+  gap: 10rpx;
+  padding: 8rpx 12rpx;
+  border: 1rpx solid #f5d19b;
+  border-radius: 16rpx;
+  background: #fff7ed;
+}
+
+.app-header__dot {
+  flex: 0 0 11rpx;
+  width: 11rpx;
+  height: 11rpx;
+  border-radius: 50%;
+  background: #f28c28;
+}
+
+.app-header__status.is-online {
+  border-color: #b8eadc;
+  background: #effcf7;
+}
+
+.is-online .app-header__dot {
+  background: #0f9f8f;
+}
+
+.app-header__status-copy text,
+.app-header__status-copy label {
+  display: block;
+  max-width: 170rpx;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-header__status-copy text {
+  color: #8a4708;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.1;
+}
+
+.is-online .app-header__status-copy text {
+  color: #087c68;
+}
+
+.app-header__status-copy label {
+  margin-top: 4rpx;
+  color: #637083;
+  font-size: 24rpx;
+  line-height: 1.1;
+}
+
+.app-header__page-copy {
+  margin-top: 24rpx;
+}
+
+.app-header__title {
+  color: #172033;
+  font-size: 42rpx;
+  font-weight: 900;
+  line-height: 1.12;
+}
+
+.app-header__subtitle {
+  max-width: 620rpx;
+  margin-top: 9rpx;
+  color: #637083;
+  font-size: 26rpx;
+  line-height: 1.45;
+}

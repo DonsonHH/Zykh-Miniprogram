@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "家人照护详情",
+  "usingComponents": {
+    "care-screen": "/components/careScreen/index"
+  }
+}

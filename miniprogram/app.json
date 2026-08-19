@@ -1,0 +1,60 @@
+{
+  "pages": [
+    "pages/index/index",
+    "pages/cabinet/index",
+    "pages/medicineList/index",
+    "pages/addMedicine/index",
+    "pages/vitals/index",
+    "pages/records/index",
+    "pages/ai/index",
+    "pages/ai/history/index",
+    "pages/familyDetail/index",
+    "pages/settings/index"
+  ],
+  "window": {
+    "backgroundColor": "#F6F9FC",
+    "navigationBarBackgroundColor": "#F6F9FC",
+    "navigationBarTitleText": "智药康护",
+    "navigationBarTextStyle": "black"
+  },
+  "tabBar": {
+    "color": "#59677B",
+    "selectedColor": "#2563EB",
+    "backgroundColor": "#FFFFFF",
+    "borderStyle": "white",
+    "list": [
+      {
+        "pagePath": "pages/index/index",
+        "text": "首页",
+        "iconPath": "images/tabbar/home.png",
+        "selectedIconPath": "images/tabbar/home-active.png"
+      },
+      {
+        "pagePath": "pages/cabinet/index",
+        "text": "药箱",
+        "iconPath": "images/tabbar/medicine.png",
+        "selectedIconPath": "images/tabbar/medicine-active.png"
+      },
+      {
+        "pagePath": "pages/ai/index",
+        "text": "问询",
+        "iconPath": "images/tabbar/inquiry.png",
+        "selectedIconPath": "images/tabbar/inquiry-active.png"
+      },
+      {
+        "pagePath": "pages/records/index",
+        "text": "照护",
+        "iconPath": "images/icons/record.png",
+        "selectedIconPath": "images/icons/record-active.png"
+      },
+      {
+        "pagePath": "pages/settings/index",
+        "text": "家人",
+        "iconPath": "images/tabbar/collaboration.png",
+        "selectedIconPath": "images/tabbar/collaboration-active.png"
+      }
+    ]
+  },
+  "style": "v2",
+  "lazyCodeLoading": "requiredComponents"
+}

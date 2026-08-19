@@ -1,0 +1,224 @@
+/* Shared inquiry history rows and the on-demand detail sheet.
+ * The tab page and history page share this domain surface without importing
+ * either page's implementation stylesheet. */
+.inquiry-loading,
+.inquiry-empty {
+  margin-top: 22rpx;
+}
+
+.inquiry-group {
+  margin-top: 24rpx;
+}
+
+.inquiry-group-head {
+  min-height: 64rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+  margin: 0 4rpx 12rpx;
+}
+
+.inquiry-group-name {
+  min-width: 0;
+  flex: 1;
+  display: -webkit-box;
+  overflow: hidden;
+  color: #172033;
+  font-size: 32rpx;
+  font-weight: 900;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.inquiry-group-head .ui-status,
+.inquiry-card__top .ui-status {
+  flex: 0 0 auto;
+}
+
+.inquiry-list {
+  overflow: hidden;
+}
+
+.inquiry-card {
+  min-height: 132rpx;
+  padding: 22rpx;
+  border-bottom: 1rpx solid #e8eef5;
+  box-sizing: border-box;
+}
+
+.inquiry-card:last-child {
+  border-bottom: 0;
+}
+
+.inquiry-card__top,
+.inquiry-card__bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14rpx;
+}
+
+.inquiry-card__top {
+  align-items: flex-start;
+}
+
+.inquiry-card__top .ui-status {
+  margin-top: 2rpx;
+}
+
+.inquiry-card__title {
+  min-width: 0;
+  flex: 1;
+  display: -webkit-box;
+  overflow: hidden;
+  color: #172033;
+  font-size: 30rpx;
+  font-weight: 850;
+  line-height: 1.3;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.inquiry-card__summary {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 8rpx;
+  color: #475467;
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.inquiry-card__bottom {
+  min-height: 52rpx;
+  margin-top: 8rpx;
+  color: #637083;
+  font-size: 24rpx;
+  font-weight: 700;
+}
+
+.inquiry-card__link {
+  min-height: 52rpx;
+  display: flex;
+  align-items: center;
+  color: #2563eb;
+  font-size: 26rpx;
+  font-weight: 850;
+}
+
+.inquiry-sheet {
+  height: 82vh;
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.inquiry-sheet-heading {
+  min-width: 0;
+  flex: 1;
+}
+
+.inquiry-sheet-scroll {
+  min-height: 0;
+  flex: 1;
+  height: 0;
+  max-height: none;
+  padding: 20rpx 24rpx calc(28rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.inquiry-detail-list {
+  margin-top: 20rpx;
+  border-top: 1rpx solid #e8eef5;
+}
+
+.inquiry-detail-kicker {
+  padding-top: 18rpx;
+}
+
+.inquiry-detail-row {
+  padding: 18rpx 0;
+  border-bottom: 1rpx solid #e8eef5;
+}
+
+.inquiry-detail-row__label {
+  color: #637083;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.inquiry-detail-row__value {
+  margin-top: 7rpx;
+  color: #172033;
+  font-size: 27rpx;
+  font-weight: 650;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.inquiry-process,
+.inquiry-process-note {
+  margin-top: 20rpx;
+}
+
+.inquiry-process-note {
+  border-radius: 16rpx;
+  background: #f2f6fb;
+  color: #52627a;
+  padding: 18rpx;
+  font-size: 25rpx;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.inquiry-process-note--loading {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+}
+
+.inquiry-message {
+  max-width: calc(100% - 12rpx);
+  min-width: 0;
+  margin-top: 14rpx;
+  padding: 18rpx 20rpx;
+  border-radius: 20rpx;
+  background: #f2f6fb;
+  box-sizing: border-box;
+}
+
+.inquiry-message--user {
+  margin-left: auto;
+  background: #edf5ff;
+}
+
+.inquiry-message--system {
+  max-width: 100%;
+  border: 1rpx solid #f5d19b;
+  background: #fff9ef;
+  box-sizing: border-box;
+}
+
+.inquiry-message__role {
+  color: #637083;
+  font-size: 24rpx;
+  font-weight: 800;
+  line-height: 1.3;
+}
+
+.inquiry-message__text {
+  min-width: 0;
+  margin-top: 7rpx;
+  color: #172033;
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+}

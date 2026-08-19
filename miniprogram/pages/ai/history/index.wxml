@@ -1,0 +1,95 @@
+<view class="page care-page inquiry-page inquiry-history-page">
+  <care-screen
+    wx:if="{{loadError}}"
+    model="{{carePage}}"
+    bind:action="onCarePageAction"
+  />
+  <block wx:else>
+    <app-header
+      title="{{pageTitle}}"
+      eyebrow=""
+      show-status="{{false}}"
+    />
+
+    <view wx:if="{{initialLoading}}" class="ui-surface ui-loading inquiry-loading">
+      <view class="ui-loading__spinner"></view>
+      <view class="ui-loading__text">正在整理{{scopeName ? scopeName + '的' : '全部'}}已完成问询摘要…</view>
+    </view>
+    <view wx:elif="{{!inquiryGroups.length}}" class="ui-surface ui-empty inquiry-empty">{{scopeName ? '全设备最近 60 条同步窗口内暂无这位家人的已完成问询。' : '全设备最近 60 条同步窗口内暂无已完成问询。'}}</view>
+    <block wx:else>
+      <view wx:if="{{historyBoundaryText}}" class="ui-surface inquiry-history-boundary">{{historyBoundaryText}}</view>
+      <view wx:for="{{inquiryGroups}}" wx:for-item="group" wx:for-index="groupIndex" wx:key="personKey" class="inquiry-group">
+        <view class="inquiry-group-head">
+          <view class="inquiry-group-name">{{group.personName}}</view>
+          <view class="ui-status ui-status--muted">{{group.countLabel}}</view>
+        </view>
+
+        <view class="ui-surface inquiry-list">
+          <view
+            wx:for="{{group.inquiries}}"
+            wx:for-item="record"
+            wx:for-index="recordIndex"
+            wx:key="id"
+            class="inquiry-card ui-pressable"
+            bindtap="viewInquiryProcess"
+            data-group-index="{{groupIndex}}"
+            data-record-index="{{recordIndex}}"
+            hover-class="tap-feedback"
+            hover-stay-time="80"
+            aria-role="button"
+            aria-label="查看{{group.personName}}的{{record.topic}}问询详情"
+          >
+            <view class="inquiry-card__top">
+              <view class="inquiry-card__title">{{record.topic}}</view>
+              <view wx:if="{{record.riskLabel}}" class="ui-status {{record.riskTone === 'danger' ? 'ui-status--danger' : (record.riskTone === 'warn' ? 'ui-status--warn' : (record.riskTone === 'good' ? 'ui-status--good' : 'ui-status--notice'))}}">{{record.riskLabel}}</view>
+            </view>
+            <view class="inquiry-card__summary">{{record.summary}}</view>
+            <view class="inquiry-card__bottom">
+              <text>{{record.timeLabel || '已同步'}}</text>
+              <view class="inquiry-card__link">查看详情 ›</view>
+            </view>
+          </view>
+        </view>
+      </view>
+    </block>
+
+    <view wx:if="{{processVisible && activeInquiry}}" class="ui-sheet-mask" catchtap="closeInquiryProcess"></view>
+    <view wx:if="{{processVisible && activeInquiry}}" class="ui-sheet inquiry-sheet" catchtap="stopProcessTap">
+    <view class="ui-sheet-grip"></view>
+    <view class="ui-sheet-head">
+      <view class="inquiry-sheet-heading">
+        <view class="ui-sheet-title">问询详情</view>
+      </view>
+      <view class="ui-sheet-close" bindtap="closeInquiryProcess">关闭</view>
+    </view>
+
+    <scroll-view scroll-y class="inquiry-sheet-scroll">
+      <view wx:if="{{activeInquiry.detailLines.length || activeInquiry.progressLabel}}" class="inquiry-detail-list">
+        <view class="ui-kicker inquiry-detail-kicker">问询摘要</view>
+        <view wx:for="{{activeInquiry.detailLines}}" wx:for-item="line" wx:key="label" class="inquiry-detail-row">
+          <view class="inquiry-detail-row__label">{{line.label}}</view>
+          <view class="inquiry-detail-row__value">{{line.value}}</view>
+        </view>
+        <view wx:if="{{activeInquiry.progressLabel}}" class="inquiry-detail-row inquiry-detail-row--progress">
+          <view class="inquiry-detail-row__label">当前状态</view>
+          <view class="inquiry-detail-row__value">{{activeInquiry.progressLabel}}</view>
+        </view>
+      </view>
+      <view wx:if="{{activeInquiry.detailLoading}}" class="inquiry-process-note inquiry-process-note--loading">
+        <view class="ui-loading__spinner ui-loading__spinner--small"></view>
+        <text>正在获取药箱端保存的问询过程…</text>
+      </view>
+      <view wx:if="{{activeInquiry.processError}}" class="inquiry-process-note">{{activeInquiry.processError}}</view>
+      <view wx:if="{{activeInquiry.conversationTruncated && activeInquiry.messages.length}}" class="inquiry-process-note">当前仅同步最近 {{activeInquiry.syncedMessageCount}} 条过程；较早内容仍留在药箱端。</view>
+      <view wx:if="{{activeInquiry.messages.length}}" class="inquiry-process">
+        <view class="ui-kicker">问询过程</view>
+        <view wx:for="{{activeInquiry.messages}}" wx:for-item="message" wx:key="id" class="inquiry-message inquiry-message--{{message.role}}">
+          <view class="inquiry-message__role">{{message.roleText}}</view>
+          <view class="inquiry-message__text">{{message.content}}</view>
+        </view>
+      </view>
+      <view wx:if="{{!activeInquiry.detailLines.length && !activeInquiry.progressLabel && !activeInquiry.messages.length && !activeInquiry.detailLoading}}" class="ui-empty">暂无可显示的问询详情。</view>
+    </scroll-view>
+    </view>
+  </block>
+</view>

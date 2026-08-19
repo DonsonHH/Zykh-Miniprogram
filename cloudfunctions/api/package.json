@@ -1,0 +1,9 @@
+{
+  "name": "zykh-cloud-api",
+  "version": "1.0.0",
+  "description": "智药康护云开发统一接口",
+  "main": "index.js",
+  "dependencies": {
+    "wx-server-sdk": "~2.6.3"
+  }
+}

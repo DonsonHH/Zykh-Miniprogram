@@ -1,0 +1,342 @@
+.family-detail-sheet__scroll {
+  max-height: 58vh;
+  padding: 12rpx 28rpx calc(28rpx + env(safe-area-inset-bottom));
+  box-sizing: border-box;
+}
+
+.family-detail-members {
+  overflow: hidden;
+}
+
+.family-member {
+  min-height: 132rpx;
+  display: flex;
+  align-items: flex-start;
+  gap: 18rpx;
+  padding: 20rpx;
+  border-bottom: 1rpx solid #e8eef5;
+  box-sizing: border-box;
+}
+
+.family-member:last-child {
+  border-bottom: 0;
+}
+
+.family-member__avatar {
+  flex: 0 0 68rpx;
+  width: 68rpx;
+  height: 68rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 20rpx;
+  color: #2563eb;
+  background: #eaf2ff;
+  font-size: 31rpx;
+  font-weight: 900;
+}
+
+.family-member__copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.family-member__top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14rpx;
+}
+
+.family-member__name {
+  min-width: 0;
+  flex: 1;
+  display: -webkit-box;
+  overflow: hidden;
+  color: #172033;
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1.3;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.family-member__top > .ui-status {
+  flex: 0 0 auto;
+}
+
+.family-member__profile,
+.family-member__next {
+  display: -webkit-box;
+  overflow: hidden;
+  margin-top: 7rpx;
+  color: #637083;
+  font-size: 26rpx;
+  font-weight: 600;
+  line-height: 1.42;
+  white-space: normal;
+  word-break: break-word;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.family-member__next {
+  color: #3e4f67;
+  font-weight: 750;
+}
+
+.family-member__next.has-pending {
+  color: #9a570b;
+}
+
+.family-detail-lines {
+  border-top: 1rpx solid #e8eef5;
+}
+
+.family-detail-line {
+  display: flex;
+  align-items: flex-start;
+  gap: 20rpx;
+  padding: 20rpx 0;
+  border-bottom: 1rpx solid #e8eef5;
+}
+
+.family-detail-line:last-child {
+  border-bottom: 0;
+}
+
+.family-detail-line__label {
+  flex: 0 0 132rpx;
+  color: #637083;
+  font-size: 25rpx;
+  font-weight: 750;
+  line-height: 1.4;
+}
+
+.family-detail-line__value {
+  flex: 1;
+  min-width: 0;
+  color: #172033;
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 1.45;
+  word-break: break-word;
+}
+
+.device-access-section {
+  margin-top: 20rpx;
+  padding: 22rpx;
+  border: 1rpx solid #dce6f2;
+  border-radius: 20rpx;
+  background: #f8fbff;
+}
+
+.device-access-title,
+.device-pairing-title {
+  color: #172033;
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.device-pairing-title {
+  font-size: 28rpx;
+}
+
+.device-access-note,
+.device-access-message,
+.device-access-warning,
+.device-pairing-message {
+  margin-top: 8rpx;
+  color: #637083;
+  font-size: 25rpx;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.device-access-warning {
+  padding: 16rpx;
+  border-radius: 14rpx;
+  color: #8a4b0f;
+  background: #fff4df;
+}
+
+.authorized-device-list {
+  overflow: hidden;
+  margin-top: 16rpx;
+  border: 1rpx solid #d6e1ee;
+  border-radius: 18rpx;
+  background: #ffffff;
+}
+
+.authorized-device-row {
+  min-height: 104rpx;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18rpx;
+  padding: 18rpx;
+  border-bottom: 1rpx solid #e8eef5;
+  box-sizing: border-box;
+}
+
+.authorized-device-row:last-child {
+  border-bottom: 0;
+}
+
+.authorized-device-row.is-selected {
+  border-color: #8fb2ff;
+  background: #edf4ff;
+}
+
+.authorized-device-row__copy {
+  flex: 1;
+  min-width: 0;
+}
+
+.authorized-device-row__name {
+  overflow: hidden;
+  color: #172033;
+  font-size: 28rpx;
+  font-weight: 850;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authorized-device-row__meta {
+  overflow: hidden;
+  margin-top: 4rpx;
+  color: #637083;
+  font-size: 25rpx;
+  font-weight: 650;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.authorized-device-row__state {
+  flex: 0 0 auto;
+  color: #174fd6;
+  font-size: 25rpx;
+  font-weight: 850;
+}
+
+.device-pairing-panel {
+  margin-top: 20rpx;
+  padding-top: 20rpx;
+  border-top: 1rpx solid #dce6f2;
+}
+
+.device-pairing-panel input {
+  width: 100%;
+  height: 88rpx;
+  margin-top: 14rpx;
+  padding: 0 18rpx;
+  border: 1rpx solid #d6e1ee;
+  border-radius: 14rpx;
+  box-sizing: border-box;
+  color: #172033;
+  background: #ffffff;
+  font-size: 27rpx;
+}
+
+.device-pairing-panel .device-action {
+  margin-top: 14rpx;
+}
+
+.device-access-refresh {
+  margin-top: 16rpx;
+}
+
+.device-pairing-message.is-error {
+  color: #b42318;
+}
+
+.device-detail-actions,
+.device-bind-panel__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12rpx;
+}
+
+.device-detail-actions {
+  margin-top: 18rpx;
+}
+
+.device-detail-actions--single {
+  grid-template-columns: 1fr;
+}
+
+.device-action {
+  min-height: 88rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 16rpx;
+  border: 1rpx solid #d6e1ee;
+  border-radius: 16rpx;
+  box-sizing: border-box;
+  color: #174fd6;
+  background: #f8fbff;
+  font-size: 27rpx;
+  font-weight: 800;
+}
+
+.device-action--primary {
+  border-color: #2563eb;
+  color: #ffffff;
+  background: #2563eb;
+}
+
+.device-action.is-disabled {
+  opacity: 0.55;
+}
+
+.device-bind-panel {
+  margin-top: 16rpx;
+  padding: 18rpx;
+  border: 1rpx solid #dce6f2;
+  border-radius: 18rpx;
+  background: #f8fbff;
+}
+
+.device-bind-panel input {
+  width: 100%;
+  height: 88rpx;
+  padding: 0 18rpx;
+  border: 1rpx solid #d6e1ee;
+  border-radius: 14rpx;
+  box-sizing: border-box;
+  color: #172033;
+  background: #ffffff;
+  font-size: 27rpx;
+}
+
+.device-bind-panel__actions {
+  margin-top: 12rpx;
+}
+
+.family-detail-link,
+.family-detail-back {
+  min-height: 88rpx;
+  display: flex;
+  align-items: center;
+  color: #174fd6;
+  font-size: 26rpx;
+  font-weight: 800;
+}
+
+.family-detail-link {
+  justify-content: center;
+  margin-top: 12rpx;
+  border: 1rpx solid #d6e1ee;
+  border-radius: 16rpx;
+  background: #f8fbff;
+}
+
+.family-detail-back {
+  margin-bottom: 6rpx;
+}

@@ -1,0 +1,7 @@
+{
+  "navigationBarTitleText": "问询历史",
+  "usingComponents": {
+    "app-header": "/components/appHeader/index",
+    "care-screen": "/components/careScreen/index"
+  }
+}

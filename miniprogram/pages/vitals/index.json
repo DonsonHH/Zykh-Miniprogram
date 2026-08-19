@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "健康测量",
+  "usingComponents": {
+    "care-screen": "/components/careScreen/index"
+  }
+}

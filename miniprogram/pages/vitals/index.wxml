@@ -1,0 +1,31 @@
+<view class="page care-page vitals-page">
+  <care-screen model="{{carePage}}" bind:action="onCarePageAction" />
+
+  <view wx:if="{{detailVisible}}" class="ui-sheet-mask" bindtap="closeMeasureDetails"></view>
+  <view wx:if="{{detailVisible}}" class="ui-sheet vitals-sheet" catchtap="noop">
+    <view class="ui-sheet-grip"></view>
+    <view class="ui-sheet-head">
+      <view class="ui-sheet-title">测量详情</view>
+      <view class="ui-sheet-close" bindtap="closeMeasureDetails" hover-class="tap-feedback" hover-stay-time="80">关闭</view>
+    </view>
+
+    <scroll-view scroll-y class="vitals-sheet__body">
+      <view class="vitals-sheet__summary">
+        <view class="vitals-sheet__summary-copy">
+          <view class="vitals-sheet__eyebrow">最近一次测量</view>
+          <view class="vitals-sheet__time">{{vitalsView.timeLabel}}</view>
+          <view class="vitals-sheet__person">测量对象：{{vitalsView.personName}}</view>
+        </view>
+        <view class="ui-status ui-status--{{vitalsView.measurementStatusClass}}">{{vitalsView.measurementStatusLabel}}</view>
+      </view>
+
+      <view class="ui-list vitals-detail-list">
+        <view wx:for="{{detailRows}}" wx:key="key" class="vitals-detail-row">
+          <view class="vitals-detail-row__label">{{item.label}}</view>
+          <view class="vitals-detail-row__value">{{item.value}}</view>
+        </view>
+      </view>
+      <view class="vitals-sheet__footnote">{{vitalsView.actionFootnote}}</view>
+    </scroll-view>
+  </view>
+</view>
