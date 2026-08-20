@@ -421,7 +421,7 @@ test("all records can load the next safety page with canonical-id deduplication 
   await page.load();
   assert.equal(listRequests[0].limit, 50);
   assert.equal(page.data.safetyNextCursor, "cursor-page-2");
-  assert.equal(page.data.carePage.overview[0].value, "至少 2");
+  assert.equal(page.data.carePage.overview[0].value, "2");
 
   page.showAllRecords();
   assert.equal(page.data.safetyPaginationVisible, true);

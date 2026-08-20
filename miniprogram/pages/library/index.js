@@ -3,6 +3,12 @@ const realtime = require("../../utils/realtime");
 const deviceSession = require("../../utils/deviceSession");
 const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
 const { summarizeMedicineLibrary } = require("../../utils/medicineLibrary");
+const { FIXED_MEDICINES } = require("../../data/fixedMedicineCatalog");
+
+function medicinesForDisplay(medicines = []) {
+  if (Array.isArray(medicines) && medicines.length) return medicines;
+  return FIXED_MEDICINES.map(item => Object.assign({}, item, { hasCloudRecord: false }));
+}
 
 function activeDeviceId() {
   const app = getApp();
@@ -38,6 +44,7 @@ function boxState(box = {}) {
 function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
   const attentionCount = (summary.attentionMedicines || []).length;
   const stale = options.stale === true;
+  const catalogOnly = options.catalogOnly === true;
   const primary = (summary.attentionMedicines || [])[0] || null;
   const focus = primary
     ? {
@@ -54,9 +61,11 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
       ? {
         eyebrow: stale ? "数据待刷新" : "家庭药库",
         title: "三类药品已整理",
-        supporting: `共 ${summary.medicineCount} 种药品，按日常、对症和护理分类查看。`,
-        state: { kind: stale ? "pending" : "normal", label: stale ? "待刷新" : "已同步" },
-        action: { id: "library.all", label: "查看全部药品" },
+        supporting: catalogOnly
+          ? `共 ${summary.medicineCount} 种药品，库存和有效期将在连接药箱后更新。`
+          : `共 ${summary.medicineCount} 种药品，按综合内服、感冒呼吸和外用护理分类查看。`,
+        state: { kind: stale ? "pending" : (catalogOnly ? "muted" : "normal"), label: stale ? "待刷新" : (catalogOnly ? "待同步" : "已同步") },
+        action: { id: "library.all.focus", label: "查看全部药品" },
         activation: "surface",
       }
       : {
@@ -105,7 +114,7 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
         title: "药品维护",
         supporting: attentionCount ? `共 ${attentionCount} 项需要关注` : "当前没有临期、过期或缺药提醒",
         empty: "当前没有需要处理的药品。",
-        items: (summary.attentionMedicines || []).slice(0, 4).map(medicine => ({
+        items: (summary.attentionMedicines || []).slice(0, 4).map((medicine, itemIndex) => ({
           key: `library-medicine-${medicine.medicineId || medicine._id}`,
           symbolText: medicine.storageBoxSymbol,
           title: medicine.name,
@@ -113,12 +122,12 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
           meta: medicine.expiryLabel || "效期待补",
           state: medicineState(medicine),
           action: {
-            id: "library.attention",
+            id: `library.attention.item.${itemIndex}`,
             label: "查看药品清单",
             payload: { filter: "attention", box: medicine.storageBox },
           },
         })),
-        more: attentionCount > 4 ? { id: "library.attention", label: `全部 ${attentionCount} 项` } : null,
+        more: attentionCount > 4 ? { id: "library.attention.more", label: `全部 ${attentionCount} 项` } : null,
       },
     ],
     detailAction: summary.medicineCount ? {
@@ -157,6 +166,7 @@ Page({
 
   startRealtime() {
     this.stopRealtime();
+    if (!activeDeviceId()) return;
     this._stopRealtime = realtime.subscribe(() => this.load(), null, {
       collections: ["devices", "medicines"],
       intervalMs: 20000,
@@ -178,12 +188,17 @@ Page({
     const requestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = requestId;
     try {
-      const [device, medicines] = await Promise.all([
-        api.getDevice(requestDeviceId),
-        api.getMedicinesStrict(requestDeviceId),
-      ]);
+      const [device, medicines] = requestDeviceId
+        ? await Promise.all([
+          api.getDevice(requestDeviceId),
+          api.getMedicinesStrict(requestDeviceId),
+        ])
+        : [{}, []];
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
-      const summary = summarizeMedicineLibrary(medicines);
+      const hasLiveMedicines = Array.isArray(medicines) && medicines.length > 0;
+      const summary = summarizeMedicineLibrary(medicinesForDisplay(medicines), {
+        includeFixedBaseline: hasLiveMedicines,
+      });
       this._hasLoadedSnapshot = true;
       this.setData({
         deviceId: requestDeviceId,
@@ -191,7 +206,7 @@ Page({
         summary,
         hasLoadedSnapshot: true,
         stale: false,
-        carePage: composeLibraryCarePage(device, summary),
+        carePage: composeLibraryCarePage(device, summary, { catalogOnly: !requestDeviceId }),
       });
     } catch (error) {
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
@@ -211,8 +226,10 @@ Page({
     const detail = event && event.detail ? event.detail : {};
     const payload = detail.payload || {};
     if (detail.id === "library.retry") return this.load();
-    if (detail.id === "library.all") return this.openList();
-    if (detail.id === "library.attention") return this.openList(payload);
+    if (detail.id === "library.all" || detail.id === "library.all.focus") return this.openList();
+    if (detail.id === "library.attention"
+      || detail.id === "library.attention.more"
+      || String(detail.id || "").indexOf("library.attention.item.") === 0) return this.openList(payload);
     if (String(detail.id || "").indexOf("library.box.") === 0) return this.openList(payload);
     return undefined;
   },

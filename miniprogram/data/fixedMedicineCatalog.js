@@ -1,4 +1,4 @@
-const FIXED_MEDICINE_REFERENCE_VERSION = "home-real-cabinet-v4-three-box";
+const FIXED_MEDICINE_REFERENCE_VERSION = "home-real-cabinet-v5-balanced-three-box";
 
 const FIXED_MEDICINES = Object.freeze([
   {
@@ -53,8 +53,8 @@ const FIXED_MEDICINES = Object.freeze([
     manufacturer: "华北制药",
     name: "阿莫西林胶囊",
     category: "抗菌药",
-    storageBox: "SYMPTOM",
-    displayOrder: 11,
+    storageBox: "DAILY",
+    displayOrder: 7,
     tags: ["青霉素类", "处方核验"],
     contraindications: ["青霉素过敏禁用", "需按既往医嘱或处方使用"],
     safetyNote: "抗菌药需确认过敏史和医嘱，不作为自行新增用药。",
@@ -113,8 +113,8 @@ const FIXED_MEDICINES = Object.freeze([
     manufacturer: "恒心堂",
     name: "藿香正气丸",
     category: "肠胃",
-    storageBox: "SYMPTOM",
-    displayOrder: 9,
+    storageBox: "DAILY",
+    displayOrder: 5,
     tags: ["暑湿不适", "腹胀呕吐"],
     contraindications: ["风热感冒不适用", "孕妇及严重慢病患者需医师指导"],
     safetyNote: "适用暑湿相关不适，胸闷心悸或吐泻明显需就医。",
@@ -174,8 +174,8 @@ const FIXED_MEDICINES = Object.freeze([
     manufacturer: "华森制药",
     name: "铝碳酸镁咀嚼片",
     category: "肠胃",
-    storageBox: "SYMPTOM",
-    displayOrder: 10,
+    storageBox: "DAILY",
+    displayOrder: 6,
     tags: ["胃酸", "胃部不适"],
     contraindications: ["重度肾损害禁用", "低磷血症或重症肌无力禁用"],
     safetyNote: "需嚼服，长期或反复胃痛应联系医生。",
@@ -422,9 +422,42 @@ function enrichKnownMedicine(medicine = {}) {
   });
 }
 
+function mergeFixedMedicineBaseline(rawMedicines = []) {
+  const liveByMedicineId = Object.create(null);
+
+  (Array.isArray(rawMedicines) ? rawMedicines : []).forEach(medicine => {
+    const known = knownMedicineFor(medicine);
+    // The current product baseline is intentionally limited to these 23
+    // medicines. Unknown legacy rows remain in cloud storage for audit, but
+    // they must not become extra medicines in the family-facing UI.
+    if (!known) return;
+    // LIST_MEDICINES is newest-first. Keep one current cloud fact per stable
+    // medicine identity so old random document ids cannot duplicate a drug.
+    if (!liveByMedicineId[known.medicineId]) {
+      liveByMedicineId[known.medicineId] = medicine;
+    }
+  });
+
+  const fixedMedicines = FIXED_MEDICINES.map(reference => {
+    const live = liveByMedicineId[reference.medicineId] || null;
+    return Object.assign({}, reference, live || {}, {
+      medicineId: reference.medicineId,
+      medicine_id: reference.medicineId,
+      legacySlot: reference.legacySlot,
+      storageBox: reference.storageBox,
+      storage_box: reference.storageBox,
+      fixedCatalogMatch: true,
+      hasCloudRecord: Boolean(live),
+    });
+  });
+
+  return fixedMedicines;
+}
+
 module.exports = {
   FIXED_MEDICINE_REFERENCE_VERSION,
   FIXED_MEDICINES,
   enrichKnownMedicine,
   knownMedicineFor,
+  mergeFixedMedicineBaseline,
 };

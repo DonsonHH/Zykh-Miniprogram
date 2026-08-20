@@ -316,6 +316,7 @@ test("three-box library ships a compact overview and a dedicated full list", () 
   const overviewLogic = fs.readFileSync(path.join(root, "miniprogram/pages/library/index.js"), "utf8");
   const overviewConfig = JSON.parse(fs.readFileSync(path.join(root, "miniprogram/pages/library/index.json"), "utf8"));
   const list = fs.readFileSync(path.join(root, "miniprogram/pages/libraryList/index.wxml"), "utf8");
+  const listLogic = fs.readFileSync(path.join(root, "miniprogram/pages/libraryList/index.js"), "utf8");
 
   assert.ok(app.pages.includes("pages/library/index"));
   assert.ok(app.pages.includes("pages/libraryList/index"));
@@ -327,7 +328,10 @@ test("three-box library ships a compact overview and a dedicated full list", () 
   assert.match(overviewLogic, /detailAction:\s*summary\.medicineCount/);
   assert.match(overviewLogic, /id:\s*"library\.all"/);
   assert.match(overviewLogic, /id:\s*"library\.attention"/);
+  assert.match(overviewLogic, /includeFixedBaseline:\s*hasLiveMedicines/);
+  assert.match(listLogic, /includeFixedBaseline:\s*hasLiveMedicines/);
   assert.doesNotMatch(`${overview}\n${overviewLogic}`, /OPEN_CABINET|DISPENSE|23\s*仓/);
+  assert.doesNotMatch(`${overview}\n${overviewLogic}\n${list}\n${listLogic}`, /模拟|示例药品/);
   assert.match(list, /wx:for="\{\{viewMedicines\}\}"/);
   assert.match(list, /storageBoxLabel/);
 });

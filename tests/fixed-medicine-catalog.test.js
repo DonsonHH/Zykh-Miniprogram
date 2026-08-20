@@ -5,6 +5,7 @@ const {
   FIXED_MEDICINES,
   enrichKnownMedicine,
   knownMedicineFor,
+  mergeFixedMedicineBaseline,
 } = require("../miniprogram/data/fixedMedicineCatalog");
 const { filterMedicines, summarizeMedicineLibrary } = require("../miniprogram/utils/medicineLibrary");
 
@@ -42,7 +43,7 @@ test("fixed catalog contains the exact current 23 medicines once", () => {
   assert.ok(FIXED_MEDICINES.every(item => item.manufacturer && item.category && item.safetyNote));
 });
 
-test("the 23 known medicines form the intended 4-11-8 three-box baseline", () => {
+test("the 23 known medicines form the balanced 7-8-8 three-box baseline", () => {
   const summary = summarizeMedicineLibrary(FIXED_MEDICINES.map(item => ({
     medicineId: item.medicineId,
     name: item.name,
@@ -50,8 +51,20 @@ test("the 23 known medicines form the intended 4-11-8 three-box baseline", () =>
     storageBox: item.storageBox,
   })));
   const counts = Object.fromEntries(summary.boxes.map(box => [box.id, box.count]));
-  assert.deepEqual(counts, { DAILY: 4, SYMPTOM: 11, CARE: 8 });
+  assert.deepEqual(counts, { DAILY: 7, SYMPTOM: 8, CARE: 8 });
   assert.equal(summary.medicineCount, 23);
+  assert.deepEqual(
+    summary.boxes.find(box => box.id === "DAILY").medicines.map(item => item.name),
+    [
+      "苯磺酸氨氯地平片",
+      "多维元素片",
+      "乳果糖口服液",
+      "双歧杆菌三联活菌肠溶胶囊",
+      "藿香正气丸",
+      "铝碳酸镁咀嚼片",
+      "阿莫西林胶囊",
+    ],
+  );
   assert.deepEqual(
     filterMedicines(summary.medicines, { keyword: "血压管理" }).map(item => item.name),
     ["苯磺酸氨氯地平片"],
@@ -73,10 +86,42 @@ test("catalog enrichment fills static reference data without replacing live fact
     manufacturer: "现场包装厂家",
   });
   assert.equal(enriched.medicineId, "slot-04-amoxicillin");
-  assert.equal(enriched.storageBox, "SYMPTOM");
+  assert.equal(enriched.storageBox, "DAILY");
   assert.equal(enriched.category, "抗菌药");
   assert.equal(enriched.manufacturer, "现场包装厂家");
   assert.equal(enriched.inventoryState, "DEPLETED");
   assert.equal(enriched.expireDate, "2030-05");
   assert.match(enriched.safetyNote, /过敏史和医嘱/);
+});
+
+test("the active medicine library overlays cloud facts onto all 23 canonical medicines", () => {
+  const merged = mergeFixedMedicineBaseline([{
+    _id: "random-cloud-document",
+    name: "阿莫西林胶囊",
+    storageBox: "SYMPTOM",
+    inventoryState: "STOCKED",
+    expireDate: "2027-12",
+    spec: "0.25g×24粒",
+  }]);
+
+  assert.equal(merged.length, 23);
+  const amoxicillin = merged.find(item => item.medicineId === "slot-04-amoxicillin");
+  assert.equal(amoxicillin.storageBox, "DAILY");
+  assert.equal(amoxicillin.inventoryState, "STOCKED");
+  assert.equal(amoxicillin.expireDate, "2027-12");
+  assert.equal(amoxicillin.spec, "0.25g×24粒");
+  assert.equal(amoxicillin.hasCloudRecord, true);
+  assert.equal(merged.find(item => item.medicineId === "slot-21-amlodipine").hasCloudRecord, false);
+});
+
+test("unknown cloud rows do not inflate the current 23-medicine family catalog", () => {
+  const merged = mergeFixedMedicineBaseline([
+    { name: "阿莫西林胶囊", quantity: 2 },
+    { _id: "old-extra-row-1", name: "历史测试药品A", quantity: 9 },
+    { _id: "old-extra-row-2", name: "历史测试药品B", quantity: 9 },
+  ]);
+
+  assert.equal(merged.length, 23);
+  assert.equal(merged.some(item => /历史测试药品/.test(item.name)), false);
+  assert.equal(merged.find(item => item.medicineId === "slot-04-amoxicillin").hasCloudRecord, true);
 });

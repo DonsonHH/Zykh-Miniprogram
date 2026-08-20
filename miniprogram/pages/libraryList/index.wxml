@@ -109,7 +109,7 @@
         <view wx:if="{{selectedMedicine.safetyNote}}" class="library-detail-item library-detail-item--wide library-detail-item--guidance"><text>安全提醒</text><view>{{selectedMedicine.safetyNote}}</view></view>
         <view class="library-detail-item library-detail-item--wide"><text>溯源码</text><view>{{selectedMedicine.traceCode || selectedMedicine.barcode || '未记录'}}</view></view>
       </view>
-      <view wx:if="{{selectedMedicine.fixedCatalogMatch}}" class="library-detail-footnote">固定资料用于家庭管理，使用前请核对实物包装说明并遵循医生或药师指导。</view>
+      <view wx:if="{{selectedMedicine.fixedCatalogMatch}}" class="library-detail-footnote">使用前请核对实物包装说明，并遵循医生或药师指导。</view>
     </scroll-view>
   </view>
 </view>

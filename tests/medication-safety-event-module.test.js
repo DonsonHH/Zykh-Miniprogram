@@ -217,6 +217,26 @@ test("capability and event read failures stay distinguishable from a real empty 
   assert.equal(empty.message, "暂无用药风险记录");
 });
 
+test("the current medication box exposes its registered safety rule when cloud history is empty", async () => {
+  const module = safetyEvents.createMedicationSafetyEventModule({
+    getCapabilitiesStrict: async () => ({ capabilities: { medicationSafetyEvents: "v1" } }),
+    getMedicationSafetyEventsStrict: async () => ({ items: [] }),
+  });
+
+  const state = await module.list({
+    deviceId: "zykh-qsm-001",
+    includeLocalFixtures: true,
+  });
+
+  assert.equal(state.availability, "ready");
+  assert.equal(state.localFallback, true);
+  assert.equal(state.events.length, 1);
+  assert.equal(state.events[0].personName, "王奶奶");
+  assert.equal(state.events[0].medicineName, "布洛芬缓释胶囊");
+  assert.match(state.events[0].reasonSummary, /胃溃疡/);
+  assert.match(state.events[0].outcomeText, /咨询医生或药师/);
+});
+
 test("malformed list and detail responses fail closed instead of becoming caregiver facts", async () => {
   const malformedList = safetyEvents.createMedicationSafetyEventModule({
     getCapabilitiesStrict: async () => ({ capabilities: { medicationSafetyEvents: "v1" } }),

@@ -1,3 +1,5 @@
+const fixedMedicationRisks = require("../data/fixedMedicationRisks");
+
 const CHECK_STATUSES = ["PASSED", "BLOCKED", "CHECK_FAILED"];
 const DISPENSE_STATUSES = ["NOT_APPLICABLE", "NOT_STARTED", "BLOCKED", "DISPENSED", "HARDWARE_FAILED", "RESULT_UNKNOWN"];
 
@@ -259,6 +261,18 @@ function normalizeMedicationSafetyEvent(raw = {}) {
   ));
   const qsmOk = firstPresent(raw.qsmOk, raw.qsm_ok, payload.qsmOk, payload.qsm_ok);
   const dryRun = firstPresent(raw.dryRun, raw.dry_run, payload.dryRun, payload.dry_run);
+  const reasonSummary = caregiverSummary(firstPresent(
+    raw.reasonSummary,
+    raw.reason_summary,
+    payload.reasonSummary,
+    payload.reason_summary,
+  ));
+  const outcomeText = text(firstPresent(
+    raw.outcomeText,
+    raw.outcome_text,
+    payload.outcomeText,
+    payload.outcome_text,
+  ));
 
   return {
     id: identity.conflictFields.length ? "" : text(eventId, `safety-${text(personId, "unknown")}-${text(occurredAt, "unknown")}`),
@@ -306,6 +320,7 @@ function normalizeMedicationSafetyEvent(raw = {}) {
       payload.reasonCodes,
       payload.reason_codes,
     )),
+    reasonSummary,
     summary: caregiverSummary(firstPresent(
       raw.summary,
       raw.caregiverSummary,
@@ -318,6 +333,7 @@ function normalizeMedicationSafetyEvent(raw = {}) {
       payload.reasonSummary,
       payload.reason_summary,
     )),
+    outcomeText,
     occurredAt: text(occurredAt),
     readState: normalizeReadState(raw, payload),
     profileRevision: firstPresent(raw.profileRevision, raw.profile_revision, payload.profileRevision, payload.profile_revision),
@@ -331,6 +347,8 @@ function normalizeMedicationSafetyEvent(raw = {}) {
     qsmOperationId: text(firstPresent(raw.qsmOperationId, raw.qsm_operation_id, payload.qsmOperationId, payload.qsm_operation_id)),
     qsmOk: isTrueFlag(qsmOk) ? true : (isFalseFlag(qsmOk) ? false : null),
     dryRun: isTrueFlag(dryRun) ? true : (isFalseFlag(dryRun) ? false : null),
+    source: text(firstPresent(raw.source, payload.source)),
+    localOnly: isTrueFlag(firstPresent(raw.localOnly, raw.local_only, payload.localOnly, payload.local_only)),
   };
 }
 
@@ -400,7 +418,7 @@ function eventPresentation(value = {}) {
       title: `${event.personName} · 存在明确用药风险`,
       subtitle: `${event.medicineName} · 不建议自行使用`,
       state: { kind: "risk", label: "明确风险" },
-      outcomeText: "不建议自行使用，请根据风险依据进一步确认",
+      outcomeText: text(event.outcomeText, "不建议自行使用，请根据风险依据进一步确认"),
     };
   }
   if (event.checkStatus === "CHECK_FAILED") {
@@ -408,7 +426,7 @@ function eventPresentation(value = {}) {
       title: `${event.personName} · 用药风险需要复核`,
       subtitle: `${event.medicineName} · 资料不足，暂不能判断`,
       state: { kind: "pending", label: "需要复核" },
-      outcomeText: "请补全个人或药品资料后重新核验",
+      outcomeText: text(event.outcomeText, "请补全个人或药品资料后重新核验"),
     };
   }
   return {
@@ -417,6 +435,22 @@ function eventPresentation(value = {}) {
     state: { kind: "normal", label: "已核验" },
     outcomeText: "暂未发现档案中已登记的风险，实际用药仍应遵循医嘱",
   };
+}
+
+function mergeLocalMedicationSafetyFixtures(state = {}, deviceId = "", options = {}) {
+  if (options.includeLocalFixtures !== true || state.availability !== "ready") return state;
+  if (Array.isArray(state.events) && state.events.length) return state;
+
+  const fixtures = fixedMedicationRisks
+    .getFixedMedicationRiskFixtures(deviceId)
+    .map(normalizeMedicationSafetyEvent);
+  if (!fixtures.length) return state;
+
+  return Object.assign({}, state, {
+    message: "",
+    events: fixtures,
+    localFallback: true,
+  });
 }
 
 function projectRecords(events = []) {
@@ -539,13 +573,14 @@ function createMedicationSafetyEventModule(gateway = {}) {
         if (rows.some(row => !isMedicationSafetyEvent(row) || !medicationSafetyEventId(row))) {
           throw new Error("medication safety event list contains an invalid row");
         }
-        return {
+        const state = {
           availability: "ready",
           message: rows.length ? "" : "暂无用药风险记录",
           events: rows.map(normalizeMedicationSafetyEvent),
           nextCursor: text(result && (result.nextCursor || result.next_cursor)),
           capabilitySnapshot,
         };
+        return mergeLocalMedicationSafetyFixtures(state, options.deviceId, options);
       } catch (error) {
         if (isForbiddenError(error)) return forbiddenState(error, { capabilitySnapshot });
         return {
@@ -586,6 +621,7 @@ function createMedicationSafetyEventModule(gateway = {}) {
     projectRecords,
     projectHome,
     projectRiskRegistry,
+    mergeLocalMedicationSafetyFixtures,
   };
 }
 
@@ -597,6 +633,7 @@ module.exports = {
   projectRecords,
   projectHome,
   projectRiskRegistry,
+  mergeLocalMedicationSafetyFixtures,
   supportsMedicationSafetyEvents,
   validateMedicationSafetyEventReadReceipt,
   createMedicationSafetyEventModule,

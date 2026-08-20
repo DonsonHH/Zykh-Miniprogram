@@ -1,7 +1,7 @@
 const { daysUntil, normalizeExpiryDate } = require("./expiry");
 const { CABINET_SLOT_COUNT } = require("./cabinetSlots");
 const { storageBoxFor } = require("./medicineLibrary");
-const { enrichKnownMedicine } = require("../data/fixedMedicineCatalog");
+const { enrichKnownMedicine, knownMedicineFor } = require("../data/fixedMedicineCatalog");
 const { validateMedicationSafetyEventReadReceipt } = require("../modules/medicationSafetyEvents");
 
 const COLLECTIONS = {
@@ -340,7 +340,12 @@ function normalizeMedicine(item) {
     raw.depletion_confirmation_source,
     "",
   );
-  const box = storageBoxFor(Object.assign({}, known, raw, { slot }));
+  // The fixed 23-medicine baseline owns the current three-box classification.
+  // Live cloud fields still own stock, expiry, specification and trace data.
+  const fixedReference = known.fixedCatalogMatch ? knownMedicineFor(raw) : null;
+  const box = fixedReference
+    ? storageBoxFor(fixedReference)
+    : storageBoxFor(Object.assign({}, known, raw, { slot }));
   return Object.assign({}, known, raw, {
     _id: raw._id || `${deviceId}-medicine-${safeId(medicineId)}`,
     deviceId,

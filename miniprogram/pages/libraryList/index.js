@@ -6,6 +6,12 @@ const {
   filterMedicines,
   summarizeMedicineLibrary,
 } = require("../../utils/medicineLibrary");
+const { FIXED_MEDICINES } = require("../../data/fixedMedicineCatalog");
+
+function medicinesForDisplay(medicines = []) {
+  if (Array.isArray(medicines) && medicines.length) return medicines;
+  return FIXED_MEDICINES.map(item => Object.assign({}, item, { hasCloudRecord: false }));
+}
 
 function activeDeviceId() {
   const app = getApp();
@@ -65,6 +71,7 @@ Page({
 
   startRealtime() {
     this.stopRealtime();
+    if (!activeDeviceId()) return;
     this._stopRealtime = realtime.subscribe(() => this.load(), null, {
       collections: ["devices", "medicines"],
       intervalMs: 20000,
@@ -87,12 +94,17 @@ Page({
     const requestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = requestId;
     try {
-      const [device, medicines] = await Promise.all([
-        api.getDevice(requestDeviceId),
-        api.getMedicinesStrict(requestDeviceId),
-      ]);
+      const [device, medicines] = requestDeviceId
+        ? await Promise.all([
+          api.getDevice(requestDeviceId),
+          api.getMedicinesStrict(requestDeviceId),
+        ])
+        : [{}, []];
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
-      const summary = summarizeMedicineLibrary(medicines);
+      const hasLiveMedicines = Array.isArray(medicines) && medicines.length > 0;
+      const summary = summarizeMedicineLibrary(medicinesForDisplay(medicines), {
+        includeFixedBaseline: hasLiveMedicines,
+      });
       this._hasLoadedSnapshot = true;
       this.setData({
         deviceId: requestDeviceId,

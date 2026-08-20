@@ -1,20 +1,24 @@
 const { expiryView, formatExpiryLabel } = require("./expiry");
-const { enrichKnownMedicine, knownMedicineFor } = require("../data/fixedMedicineCatalog");
+const {
+  enrichKnownMedicine,
+  knownMedicineFor,
+  mergeFixedMedicineBaseline,
+} = require("../data/fixedMedicineCatalog");
 
 const STORAGE_BOXES = Object.freeze([
   Object.freeze({
     id: "DAILY",
-    label: "日常用药",
-    shortLabel: "日常",
-    symbol: "日",
-    description: "长期管理与日常口服药",
+    label: "综合内服",
+    shortLabel: "内服",
+    symbol: "内",
+    description: "慢病、营养、胃肠与抗菌类内服药",
   }),
   Object.freeze({
     id: "SYMPTOM",
-    label: "对症药品",
-    shortLabel: "对症",
-    symbol: "对",
-    description: "感冒、呼吸、消化与临时对症药",
+    label: "感冒呼吸",
+    shortLabel: "呼吸",
+    symbol: "呼",
+    description: "感冒、流感、咽喉、咳嗽、鼻炎与过敏药",
   }),
   Object.freeze({
     id: "CARE",
@@ -32,8 +36,11 @@ const STORAGE_BOX_BY_ID = Object.freeze(STORAGE_BOXES.reduce((result, box) => {
 
 const LEGACY_SLOT_BOX = Object.freeze({
   2: "DAILY",
+  4: "DAILY",
   6: "DAILY",
+  8: "DAILY",
   9: "DAILY",
+  12: "DAILY",
   21: "DAILY",
   10: "CARE",
   13: "CARE",
@@ -96,6 +103,9 @@ function explicitStorageBox(value) {
     "日常": "DAILY",
     "日常用药": "DAILY",
     "日常口服": "DAILY",
+    "内服": "DAILY",
+    "综合内服": "DAILY",
+    "基础内服": "DAILY",
     "2": "SYMPTOM",
     BOX2: "SYMPTOM",
     SYMPTOM: "SYMPTOM",
@@ -104,6 +114,9 @@ function explicitStorageBox(value) {
     "对症": "SYMPTOM",
     "对症药品": "SYMPTOM",
     "对症备用": "SYMPTOM",
+    "呼吸": "SYMPTOM",
+    "感冒呼吸": "SYMPTOM",
+    "感冒与呼吸": "SYMPTOM",
     "3": "CARE",
     BOX3: "CARE",
     CARE: "CARE",
@@ -242,13 +255,18 @@ function sortMedicines(medicines = []) {
 }
 
 function isAttentionMedicine(medicine = {}) {
+  // The built-in catalog has no live cloud snapshot yet. Missing expiry or
+  // inventory facts there are unknowns, not maintenance tasks.
+  if (medicine.hasCloudRecord === false) return false;
   return medicine.isDepleted
-    || medicine.isInventoryUnknown
     || ["expired", "urgent", "soon", "missing"].includes(medicine.statusClass);
 }
 
-function summarizeMedicineLibrary(rawMedicines = []) {
-  const medicines = sortMedicines((rawMedicines || [])
+function summarizeMedicineLibrary(rawMedicines = [], options = {}) {
+  const sourceMedicines = options.includeFixedBaseline === true
+    ? mergeFixedMedicineBaseline(rawMedicines)
+    : (rawMedicines || []);
+  const medicines = sortMedicines(sourceMedicines
     .filter(medicine => medicine && text(medicine.name))
     .map(decorateMedicine));
   const boxes = STORAGE_BOXES.map(box => {
@@ -311,6 +329,7 @@ module.exports = {
   inventoryView,
   isAttentionMedicine,
   medicineIdentity,
+  mergeFixedMedicineBaseline,
   storageBoxFor,
   storageBoxId,
   summarizeMedicineLibrary,

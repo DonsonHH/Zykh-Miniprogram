@@ -791,8 +791,8 @@ test("an unread safety block stays visible as attention while connection remains
         capabilities: { medicationSafetyEvents: "v1" },
       }),
       getMedicationSafetyEventsStrict: async options => {
-        assert.equal(options.unreadOnly, true);
-        assert.equal(options.limit, 10);
+        assert.equal(options.unreadOnly, false);
+        assert.equal(options.limit, 100);
         return { items: [{
           type: "MEDICATION_SAFETY_CHECK",
           event_id: "safety-wang-focus",

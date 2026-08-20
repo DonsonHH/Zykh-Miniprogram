@@ -1,6 +1,6 @@
 # 三盒药库与板端同步迁移说明
 
-本文档对应 CloudBase schema revision `3.0-three-box-library`。目标是把旧版“23 个独立药仓 + 电控出药”迁移为“终端溯源码入库 + 三个分类药盒 + 用户现场自行取药”。
+本文档对应 CloudBase schema revision `3.0-three-box-library`。目标是把旧版“23 个独立药仓 + 电控出药”迁移为“终端溯源码入库 + 三个分类药盒 + 家庭药品管理”。
 
 ## 1. 新的职责边界
 
@@ -21,16 +21,16 @@ CloudBase api 云函数
 
 | `storageBox` | 界面名称 | 内容 |
 | --- | --- | --- |
-| `DAILY` | 日常用药 | 长期管理、慢病和日常口服药 |
-| `SYMPTOM` | 对症药品 | 感冒、呼吸、消化及临时对症药 |
+| `DAILY` | 综合内服 | 慢病、营养、胃肠与抗菌类内服药 |
+| `SYMPTOM` | 感冒呼吸 | 感冒、流感、咽喉、咳嗽、鼻炎与过敏药 |
 | `CARE` | 外用与护理 | 外用药、消毒用品和伤口护理用品 |
 
 旧 23 仓数据的一次性默认映射如下：
 
 | 新药盒 | 旧仓号 |
 | --- | --- |
-| 日常用药 | 2、6、9、21 |
-| 对症药品 | 1、3、4、5、7、8、11、12、14、18、23 |
+| 综合内服 | 2、4、6、8、9、12、21 |
+| 感冒呼吸 | 1、3、5、7、11、14、18、23 |
 | 外用与护理 | 10、13、15、16、17、19、20、22 |
 
 该映射只用于迁移现有 23 条记录。迁移后必须把结果写入 `storage_box`，不得继续按旧仓号决定药品位置。
@@ -69,7 +69,7 @@ Station 使用 `UPLOAD_MEDICINES` 或快照批次接口上传。每条记录至�
   "spec": "0.25g*24粒",
   "traceCode": "追溯码或条码",
   "manufacturer": "生产厂家",
-  "storageBox": "SYMPTOM",
+  "storageBox": "DAILY",
   "inventoryState": "STOCKED",
   "expireDate": "2027-12",
   "expiryPrecision": "month"
@@ -78,28 +78,9 @@ Station 使用 `UPLOAD_MEDICINES` 或快照批次接口上传。每条记录至�
 
 云端文档 ID 由 `deviceId + medicineId` 生成。`slot` / `hardware_slot` 仍可随旧记录上传，但只作为兼容字段，小程序不会显示或操作它。
 
-## 5. 现场用药记录
+## 5. 余量状态更新
 
-没有自动出药后，“已经用药”必须来自现场人工确认，不能由命令完成、AI 推荐或风险核验通过推断。推荐上传到 `records`：
-
-```json
-{
-  "id": "use-20260819-001",
-  "type": "MEDICATION_USE",
-  "service_user_id": "person-zhang",
-  "persona_generation": "g1",
-  "person_name": "张三",
-  "medicine_id": "med-8d3d4f2a",
-  "medicine_name": "阿莫西林胶囊",
-  "storage_box": "SYMPTOM",
-  "usage_status": "TAKEN",
-  "quantity": 1,
-  "unit": "粒",
-  "created_at": "2026-08-19 20:00:00"
-}
-```
-
-若用户在终端确认药品已经用完，同时更新该药品：
+当前版本不建立取药流程，也不生成取药记录。若终端确认某种药已经用完，只更新该药品的余量事实：
 
 ```json
 {
@@ -145,16 +126,15 @@ AI 给出药品建议前，Station 应结合当前人物档案和药库信息完
 ## 8. 部署与验收
 
 1. 部署本仓库 `cloudfunctions/api`，调用 `PING`，确认 `schemaRevision` 为 `3.0-three-box-library`。
-2. 确认能力包含 `medicineStorageBoxes=v1`、`manualMedicationUse=v1` 和 `medicationRiskRegistry=v1`。
+2. 确认能力包含 `medicineStorageBoxes=v1` 和 `medicationRiskRegistry=v1`。
 3. 完成本地数据库迁移并上传一次完整药品快照。
 4. 备份并清理该设备旧版随机 ID 药品文档；云函数只会自动回收由 `zykh_station_app` 标记为同步所有者的旧快照。
 5. 在云数据库确认同一设备每个 `medicineId` 只有一条药品文档。
-6. 打开小程序“药库”，确认三个药盒总数之和等于上传药品总数。
+6. 打开小程序“药库”，确认综合内服 7 种、感冒呼吸 8 种、外用护理 8 种。
 7. 修改一条药品有效期并重新上传，确认小程序在下一次实时刷新后更新。
 8. 上传一条 `DEPLETED` 药品，确认出现补药提示；上传 `UNKNOWN`，确认只显示余量待确认。
-9. 上传现场 `MEDICATION_USE` 记录，确认照护页显示人物、药品、时间和存放药盒。
-10. 上传一条 `BLOCKED + NOT_APPLICABLE` 风险事件，确认“用药风险”页按人物和药品展示。
-11. 确认小程序不存在 23 仓、开柜、出药或舵机操作入口。
+9. 上传一条 `BLOCKED + NOT_APPLICABLE` 风险事件，确认“用药风险”页按人物和药品展示。
+10. 确认小程序不存在取药记录、23 仓、开柜、出药或舵机操作入口。
 
 ## 9. 回滚原则
 

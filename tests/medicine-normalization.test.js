@@ -143,6 +143,21 @@ test("a medicine without an explicit board inventory state remains unknown", () 
   assert.equal(medicine.stock, undefined);
 });
 
+test("known 23-medicine rows use the current canonical box despite an old cloud box value", () => {
+  const medicine = normalizeMedicine({
+    deviceId: "station-001",
+    name: "阿莫西林胶囊",
+    storageBox: "SYMPTOM",
+    inventoryState: "STOCKED",
+    expireDate: "2027-12",
+  });
+
+  assert.equal(medicine.storageBox, "DAILY");
+  assert.equal(medicine.storageBoxLabel, "综合内服");
+  assert.equal(medicine.inventoryState, "STOCKED");
+  assert.equal(medicine.expireDate, "2027-12");
+});
+
 test("a category is not silently presented or submitted as a package specification", () => {
   const medicine = normalizeMedicine({
     deviceId: "station-001",

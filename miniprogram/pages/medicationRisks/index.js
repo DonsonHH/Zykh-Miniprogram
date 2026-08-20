@@ -22,6 +22,7 @@ function reasonText(event = {}) {
     MEDICINE_DATA_INCOMPLETE: "药品资料不足",
     EXPIRED: "药品已超过有效期",
   };
+  if (event.reasonSummary) return event.reasonSummary;
   const reasons = (event.reasonCodes || []).map(code => labels[code] || code).filter(Boolean);
   return reasons.join("；") || event.summary || "风险依据等待终端同步";
 }
@@ -37,6 +38,11 @@ function decorateRisk(event = {}) {
     reasonText: reasonText(event),
     riskState: riskState(event),
   });
+}
+
+function riskActionId(eventId, scope = "item") {
+  const safeId = String(eventId || "risk").replace(/[^A-Za-z0-9_.-]/g, "-");
+  return `risks.open.${scope}.${safeId}`;
 }
 
 function composeRiskCarePage(device = {}, state = {}, options = {}) {
@@ -62,7 +68,7 @@ function composeRiskCarePage(device = {}, state = {}, options = {}) {
       title: `${primary.personName} · ${primary.medicineName}`,
       supporting: primary.summary || primary.reasonText,
       state: primary.riskState,
-      action: { id: "risks.open", label: "查看风险详情", payload: { eventId: primary.id } },
+      action: { id: riskActionId(primary.id, "focus"), label: "查看风险详情", payload: { eventId: primary.id } },
       activation: "surface",
     } : {
       eyebrow: "家庭用药安全",
@@ -90,7 +96,11 @@ function composeRiskCarePage(device = {}, state = {}, options = {}) {
         supporting: event.reasonText,
         meta: [event.occurredAt, event.occurrenceCount > 1 ? `${event.occurrenceCount} 次核验` : ""].filter(Boolean).join(" · "),
         state: event.riskState,
-        action: { id: "risks.open", label: "查看风险详情", payload: { eventId: event.eventId || event.id } },
+        action: {
+          id: riskActionId(event.eventId || event.id),
+          label: "查看风险详情",
+          payload: { eventId: event.eventId || event.id },
+        },
       })),
     }, {
       key: "risks-review-list",
@@ -104,7 +114,11 @@ function composeRiskCarePage(device = {}, state = {}, options = {}) {
         supporting: event.reasonText,
         meta: event.occurredAt,
         state: event.riskState,
-        action: { id: "risks.open", label: "查看核验详情", payload: { eventId: event.eventId || event.id } },
+        action: {
+          id: riskActionId(event.eventId || event.id, "review"),
+          label: "查看核验详情",
+          payload: { eventId: event.eventId || event.id },
+        },
       })),
     }],
   });
@@ -163,7 +177,7 @@ Page({
     try {
       const [device, riskState] = await Promise.all([
         api.getDevice(requestDeviceId),
-        riskGateway.list({ deviceId: requestDeviceId, limit: 100 }),
+        riskGateway.list({ deviceId: requestDeviceId, limit: 100, includeLocalFixtures: true }),
       ]);
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
       this._hasLoadedSnapshot = riskState.availability === "ready";
@@ -190,7 +204,9 @@ Page({
   onCarePageAction(event) {
     const detail = event && event.detail ? event.detail : {};
     if (detail.id === "risks.retry") return this.load();
-    if (detail.id === "risks.open") return this.openRisk(detail.payload && detail.payload.eventId);
+    if (String(detail.id || "").indexOf("risks.open.") === 0) {
+      return this.openRisk(detail.payload && detail.payload.eventId);
+    }
     return undefined;
   },
 
@@ -208,6 +224,14 @@ Page({
     const selectedRisk = decorateRisk(Object.assign({}, event, medicationSafetyEvents.eventPresentation(event)));
     this.setData({ selectedRisk, detailVisible: true });
     if (event.readState !== "UNREAD") return;
+    if (event.localOnly === true) {
+      const events = (this.data.riskState.events || []).map(item => (
+        item.id === event.id ? Object.assign({}, item, { readState: "READ" }) : item
+      ));
+      const riskState = Object.assign({}, this.data.riskState, { events });
+      this.setData({ riskState, carePage: composeRiskCarePage(this.data.device, riskState) });
+      return;
+    }
     try {
       await riskGateway.markRead(event.id, {
         deviceId: this.data.deviceId,

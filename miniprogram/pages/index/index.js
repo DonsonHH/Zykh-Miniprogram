@@ -349,12 +349,16 @@ function homeCarePage(state = {}) {
   }
 
   const attentionItems = [];
-  if (Number(state.unreadRiskCount || 0) > 0) {
+  if (Number(state.riskCount || 0) > 0) {
+    const unreadRiskCount = Number(state.unreadRiskCount || 0);
     attentionItems.push({
       key: "home-attention-safety",
       symbol: "safety",
-      title: `${state.unreadRiskCount} 条用药风险待查看`,
-      supporting: "查看涉及的家人、药品和风险依据",
+      title: `${state.riskCount} 条用药风险`,
+      supporting: [
+        unreadRiskCount ? `${unreadRiskCount} 条待查看` : "均已查看",
+        "查看涉及的家人、药品和风险依据",
+      ].join(" · "),
       state: { kind: "risk", label: "需确认" },
       action: { id: "home.risks", label: "查看用药风险" },
     });
@@ -556,6 +560,7 @@ Page({
     safetyState: { availability: "unknown", events: [], message: "暂时无法确认安全记录是否为最新" },
     deviceId: "",
     safetyDeviceId: "",
+    riskCount: 0,
     todaySafetyCount: 0,
     primaryMedicineFilter: "all",
   },
@@ -636,6 +641,7 @@ Page({
         stale: false,
         safetyState: { availability: "unknown", events: [], message: "暂时无法确认安全记录是否为最新" },
         safetyDeviceId: requestDeviceId,
+        riskCount: 0,
         todaySafetyCount: 0,
       });
     }
@@ -652,7 +658,12 @@ Page({
         api.getRecentCommandsStrict(12, requestDeviceId),
         api.getSnapshotStrict({ inquiryLimit: 12, deviceId: requestDeviceId }),
         api.getRecentVitalsStrict(20, requestDeviceId),
-        medicationSafetyEventModule.list({ limit: 10, unreadOnly: true, deviceId: requestDeviceId }),
+        medicationSafetyEventModule.list({
+          limit: 100,
+          unreadOnly: false,
+          deviceId: requestDeviceId,
+          includeLocalFixtures: true,
+        }),
       ]);
       if (loadRequestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
 
@@ -711,7 +722,11 @@ Page({
       )));
       const pendingPlans = todayPlans.filter(isPlanActionable);
       const completedPlans = todayPlans.filter(plan => isDoneStatus(plan.status));
-      const medicineSummary = medicineLibrary.summarizeMedicineLibrary(medicines || []);
+      const hasFixedCatalogSnapshot = Array.isArray(medicines)
+        && medicines.some(item => item && item.fixedCatalogMatch === true);
+      const medicineSummary = medicineLibrary.summarizeMedicineLibrary(medicines || [], {
+        includeFixedBaseline: hasFixedCatalogSnapshot,
+      });
       const inventoryMedicines = medicineSummary.medicines;
       const risks = medicineRiskItems(inventoryMedicines.filter(item => !item.isDepleted));
       const depleted = depletedMedicineItems(inventoryMedicines);
@@ -766,6 +781,13 @@ Page({
       });
 
       const safetyProjection = medicationSafetyEvents.projectHome(visibleSafetyEvents);
+      // CloudBase has already applied the caregiver/device permission check.
+      // Use the complete authorized safety list for the home count so it
+      // matches the risk registry page; persona filtering remains for the
+      // mixed care timeline below.
+      const safetyOverviewProjection = medicationSafetyEvents.projectHome(effectiveSafetyState.events || []);
+      const safetyOverviewRegistry = medicationSafetyEvents.projectRiskRegistry(effectiveSafetyState.events || []);
+      const riskCount = safetyOverviewRegistry.all.length;
       if (safetyProjection.focusBlocked) {
         const event = safetyProjection.focusBlocked;
         todoItems.push({
@@ -865,7 +887,8 @@ Page({
         deviceId: requestDeviceId,
         safetyDeviceId: requestDeviceId,
         todaySafetyCount: safetyProjection.todayBlockedCount,
-        unreadRiskCount: safetyProjection.unreadBlockedCount + safetyProjection.unreadCheckFailedCount,
+        unreadRiskCount: safetyOverviewProjection.unreadBlockedCount + safetyOverviewProjection.unreadCheckFailedCount,
+        riskCount,
         stale: transientSafetyFailure,
       };
       nextData.carePage = homeCarePage(nextData);

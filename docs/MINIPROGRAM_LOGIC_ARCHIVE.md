@@ -60,7 +60,7 @@ CloudBase 环境：cloud1-d6gv6t2jf3f2c541c
 | 页面 | 路径 | 当前职责 |
 | --- | --- | --- |
 | 首页 | `pages/index/index` | 今日计划、用药提醒、需关注药品、最近体征、问询和风险动态 |
-| 三盒药库 | `pages/library/index` | 按日常用药、对症药品、外用与护理展示药库概览 |
+| 三盒药库 | `pages/library/index` | 按综合内服、感冒呼吸、外用与护理展示当前 23 种药品 |
 | 药品清单 | `pages/libraryList/index` | 查看完整药品列表并按药盒、有效期和余量状态筛选 |
 | 用药风险 | `pages/medicationRisks/index` | 按人物与药品聚合风险，查看依据和建议 |
 | 健康测量 | `pages/vitals/index` | 查看最新体征，选择授权家庭成员后发起远程测量 |
@@ -88,11 +88,11 @@ pages/addMedicine/
 
 | storageBox | 用户名称 | 用途 |
 | --- | --- | --- |
-| `DAILY` | 日常用药 | 长期管理与日常口服药 |
-| `SYMPTOM` | 对症药品 | 感冒、呼吸、消化及临时对症药 |
+| `DAILY` | 综合内服 | 慢病、营养、胃肠与抗菌类内服药 |
+| `SYMPTOM` | 感冒呼吸 | 感冒、流感、咽喉、咳嗽、鼻炎与过敏药 |
 | `CARE` | 外用与护理 | 外用药、消毒用品和伤口护理 |
 
-当前 23 种药品只是现阶段固定药品基线，映射资料位于：
+当前 23 种药品是现阶段正式药品基线，采用 `7 / 8 / 8` 分类。映射资料位于：
 
 ```text
 miniprogram/data/fixedMedicineCatalog.js
@@ -303,7 +303,7 @@ node tools/validate-miniprogram-ui.js
 当前归档基线：
 
 ```text
-441 项自动化测试通过
+442 项自动化测试通过
 136 个小程序文件通过 UI 静态校验
 活动页面不读取旧取药 records
 活动页面不存在远程开柜或 DISPENSE 入口

@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const {
   filterMedicines,
+  isAttentionMedicine,
   storageBoxId,
   summarizeMedicineLibrary,
 } = require("../miniprogram/utils/medicineLibrary");
@@ -14,6 +15,9 @@ test("explicit three-box values win over legacy classification", () => {
 
 test("the former 23 medicines are deterministically grouped into three boxes", () => {
   assert.equal(storageBoxId({ slot: 2, name: "多维元素片" }), "DAILY");
+  assert.equal(storageBoxId({ slot: 4, name: "阿莫西林胶囊" }), "DAILY");
+  assert.equal(storageBoxId({ slot: 8, name: "藿香正气丸" }), "DAILY");
+  assert.equal(storageBoxId({ slot: 12, name: "铝碳酸镁咀嚼片" }), "DAILY");
   assert.equal(storageBoxId({ slot: 1, name: "复方感冒灵颗粒" }), "SYMPTOM");
   assert.equal(storageBoxId({ slot: 20, name: "创口贴" }), "CARE");
 });
@@ -49,4 +53,17 @@ test("library filters by box, attention state and medicine text", () => {
   assert.deepEqual(filterMedicines(summary.medicines, { box: "CARE" }).map(item => item.name), ["创口贴"]);
   assert.deepEqual(filterMedicines(summary.medicines, { filter: "depleted" }).map(item => item.name), ["感冒灵"]);
   assert.deepEqual(filterMedicines(summary.medicines, { keyword: "氨氯" }).map(item => item.name), ["氨氯地平"]);
+});
+
+test("catalog-only medicines do not become maintenance alerts without live facts", () => {
+  assert.equal(isAttentionMedicine({
+    hasCloudRecord: false,
+    isInventoryUnknown: true,
+    statusClass: "missing",
+  }), false);
+  assert.equal(isAttentionMedicine({
+    hasCloudRecord: true,
+    isInventoryUnknown: true,
+    statusClass: "missing",
+  }), true);
 });

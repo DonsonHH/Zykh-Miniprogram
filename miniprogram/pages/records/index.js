@@ -248,9 +248,7 @@ function buildRecordsCarePage(state = {}) {
         key: "records-today-safety",
         label: "今日风险",
         value: state.safetyState && state.safetyState.availability === "ready"
-          ? (state.safetyNextCursor
-            ? `至少 ${Number(state.todaySafetyCount) || 0}`
-            : (Number(state.todaySafetyCount) || 0))
+          ? (Number(state.todaySafetyCount) || 0)
           : (state.safetyState && state.safetyState.availability === "unsupported"
             ? "未支持"
             : (state.safetyState && state.safetyState.availability === "forbidden" ? "无权限" : "待确认")),
@@ -508,7 +506,11 @@ Page({
       const [device, vitals, safetyState, snapshotRead] = await Promise.all([
         api.getDevice(requestDeviceId),
         api.getRecentVitalsStrict(80, requestDeviceId),
-        medicationSafetyEventModule.list({ limit: 50, deviceId: requestDeviceId }),
+        medicationSafetyEventModule.list({
+          limit: 50,
+          deviceId: requestDeviceId,
+          includeLocalFixtures: true,
+        }),
         api.getSnapshotStrict({ inquiryLimit: 1, deviceId: requestDeviceId }),
       ]);
       if (loadGeneration !== this._loadGeneration || !this.isDeviceScopeCurrent(requestDeviceId)) return;
@@ -760,6 +762,16 @@ Page({
     if (detailRequestId !== this._safetyDetailRequestId ||
       !this.isDeviceScopeCurrent(scopeDeviceId) ||
       !safetyRecordMatchesDevice(nextRecord, scopeDeviceId)) {
+      return nextRecord;
+    }
+    if (nextRecord && nextRecord.localOnly === true) {
+      nextRecord = Object.assign({}, nextRecord, {
+        readState: "READ",
+        readText: "已查看",
+      });
+      if (detailRequestId === this._safetyDetailRequestId && this.isDeviceScopeCurrent(scopeDeviceId)) {
+        this.replaceSafetyRecord(nextRecord, scopeDeviceId);
+      }
       return nextRecord;
     }
     try {
