@@ -152,8 +152,8 @@ test("known 23-medicine rows use the current canonical box despite an old cloud 
     expireDate: "2027-12",
   });
 
-  assert.equal(medicine.storageBox, "DAILY");
-  assert.equal(medicine.storageBoxLabel, "综合内服");
+  assert.equal(medicine.storageBox, "PRESCRIPTION");
+  assert.equal(medicine.storageBoxLabel, "慢病处方储备");
   assert.equal(medicine.inventoryState, "STOCKED");
   assert.equal(medicine.expireDate, "2027-12");
 });

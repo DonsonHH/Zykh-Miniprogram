@@ -12,7 +12,7 @@ const { filterMedicines, summarizeMedicineLibrary } = require("../miniprogram/ut
 const EXPECTED_NAMES = [
   "复方感冒灵颗粒",
   "多维元素片",
-  "感冒清热颗粒",
+  "布洛芬缓释胶囊",
   "阿莫西林胶囊",
   "蜜炼川贝枇杷膏",
   "乳果糖口服液",
@@ -22,7 +22,7 @@ const EXPECTED_NAMES = [
   "医用纱布敷料",
   "桂林西瓜霜",
   "铝碳酸镁咀嚼片",
-  "玻璃酸钠滴眼液",
+  "蒙脱石散",
   "磷酸奥司他韦胶囊",
   "莫匹罗星软膏",
   "酮康唑乳膏",
@@ -43,7 +43,7 @@ test("fixed catalog contains the exact current 23 medicines once", () => {
   assert.ok(FIXED_MEDICINES.every(item => item.manufacturer && item.category && item.safetyNote));
 });
 
-test("the 23 known medicines form the balanced 7-8-8 three-box baseline", () => {
+test("the 23 known medicines form the 9-8-5 ordinary-box baseline plus one cold-storage medicine", () => {
   const summary = summarizeMedicineLibrary(FIXED_MEDICINES.map(item => ({
     medicineId: item.medicineId,
     name: item.name,
@@ -51,18 +51,21 @@ test("the 23 known medicines form the balanced 7-8-8 three-box baseline", () => 
     storageBox: item.storageBox,
   })));
   const counts = Object.fromEntries(summary.boxes.map(box => [box.id, box.count]));
-  assert.deepEqual(counts, { DAILY: 7, SYMPTOM: 8, CARE: 8 });
+  assert.deepEqual(counts, { DAILY: 9, CARE: 8, PRESCRIPTION: 5 });
   assert.equal(summary.medicineCount, 23);
+  assert.equal(summary.coldStorageCount, 1);
   assert.deepEqual(
     summary.boxes.find(box => box.id === "DAILY").medicines.map(item => item.name),
     [
-      "苯磺酸氨氯地平片",
-      "多维元素片",
-      "乳果糖口服液",
-      "双歧杆菌三联活菌肠溶胶囊",
+      "复方感冒灵颗粒",
+      "布洛芬缓释胶囊",
+      "枸地氯雷他定胶囊",
       "藿香正气丸",
       "铝碳酸镁咀嚼片",
-      "阿莫西林胶囊",
+      "银黄颗粒",
+      "桂林西瓜霜",
+      "蜜炼川贝枇杷膏",
+      "蒙脱石散",
     ],
   );
   assert.deepEqual(
@@ -86,7 +89,7 @@ test("catalog enrichment fills static reference data without replacing live fact
     manufacturer: "现场包装厂家",
   });
   assert.equal(enriched.medicineId, "slot-04-amoxicillin");
-  assert.equal(enriched.storageBox, "DAILY");
+  assert.equal(enriched.storageBox, "PRESCRIPTION");
   assert.equal(enriched.category, "抗菌药");
   assert.equal(enriched.manufacturer, "现场包装厂家");
   assert.equal(enriched.inventoryState, "DEPLETED");
@@ -106,7 +109,7 @@ test("the active medicine library overlays cloud facts onto all 23 canonical med
 
   assert.equal(merged.length, 23);
   const amoxicillin = merged.find(item => item.medicineId === "slot-04-amoxicillin");
-  assert.equal(amoxicillin.storageBox, "DAILY");
+  assert.equal(amoxicillin.storageBox, "PRESCRIPTION");
   assert.equal(amoxicillin.inventoryState, "STOCKED");
   assert.equal(amoxicillin.expireDate, "2027-12");
   assert.equal(amoxicillin.spec, "0.25g×24粒");

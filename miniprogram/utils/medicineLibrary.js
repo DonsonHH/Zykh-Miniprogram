@@ -8,48 +8,66 @@ const {
 const STORAGE_BOXES = Object.freeze([
   Object.freeze({
     id: "DAILY",
-    label: "综合内服",
-    shortLabel: "内服",
-    symbol: "内",
-    description: "慢病、营养、胃肠与抗菌类内服药",
-  }),
-  Object.freeze({
-    id: "SYMPTOM",
-    label: "感冒呼吸",
-    shortLabel: "呼吸",
-    symbol: "呼",
-    description: "感冒、流感、咽喉、咳嗽、鼻炎与过敏药",
+    label: "日常高频内服",
+    shortLabel: "日常内服",
+    symbol: "日",
+    description: "感冒、发热、咳嗽、过敏与胃肠不适",
   }),
   Object.freeze({
     id: "CARE",
-    label: "外用与护理",
-    shortLabel: "护理",
+    label: "外用消毒护理",
+    shortLabel: "外用护理",
     symbol: "护",
-    description: "外用药、消毒用品与伤口护理",
+    description: "消毒、伤口、皮肤、鼻部与局部疼痛",
+  }),
+  Object.freeze({
+    id: "PRESCRIPTION",
+    label: "慢病处方储备",
+    shortLabel: "专属储备",
+    symbol: "专",
+    description: "慢病、处方、固定用药与低频储备",
   }),
 ]);
 
-const STORAGE_BOX_BY_ID = Object.freeze(STORAGE_BOXES.reduce((result, box) => {
+const COLD_STORAGE = Object.freeze({
+  id: "COLD",
+  label: "冷藏药品",
+  shortLabel: "冷藏",
+  symbol: "冷",
+  description: "需放入冰箱冷藏，不占用三个普通药柜",
+});
+
+const STORAGE_BOX_BY_ID = Object.freeze(STORAGE_BOXES.concat(COLD_STORAGE).reduce((result, box) => {
   result[box.id] = box;
   return result;
 }, {}));
 
+const STORAGE_LOCATION_ORDER = ["DAILY", "CARE", "PRESCRIPTION", "COLD"];
+
 const LEGACY_SLOT_BOX = Object.freeze({
-  2: "DAILY",
-  4: "DAILY",
-  6: "DAILY",
+  1: "DAILY",
+  3: "DAILY",
+  5: "DAILY",
+  7: "DAILY",
   8: "DAILY",
-  9: "DAILY",
+  11: "DAILY",
   12: "DAILY",
-  21: "DAILY",
+  13: "DAILY",
+  23: "DAILY",
   10: "CARE",
-  13: "CARE",
   15: "CARE",
   16: "CARE",
   17: "CARE",
+  18: "CARE",
   19: "CARE",
   20: "CARE",
   22: "CARE",
+  2: "PRESCRIPTION",
+  4: "PRESCRIPTION",
+  6: "PRESCRIPTION",
+  14: "PRESCRIPTION",
+  21: "PRESCRIPTION",
+  9: "COLD",
 });
 
 const CARE_KEYWORDS = [
@@ -57,8 +75,11 @@ const CARE_KEYWORDS = [
   "创口贴", "纱布", "棉签", "敷料", "贴剂", "洗剂",
 ];
 const DAILY_KEYWORDS = [
-  "氨氯地平", "缬沙坦", "厄贝沙坦", "二甲双胍", "阿托伐他汀", "长期",
-  "慢病", "维生素", "多维元素", "乳果糖", "双歧杆菌", "益生菌",
+  "复方感冒灵", "布洛芬", "蜜炼川贝", "银黄", "西瓜霜", "蒙脱石",
+  "铝碳酸镁", "藿香正气", "氯雷他定", "感冒", "咳嗽", "过敏", "胃肠",
+];
+const PRESCRIPTION_KEYWORDS = [
+  "氨氯地平", "奥司他韦", "阿莫西林", "多维元素", "乳果糖", "慢病", "处方", "长期",
 ];
 
 function text(value) {
@@ -99,26 +120,29 @@ function explicitStorageBox(value) {
     BOX1: "DAILY",
     DAILY: "DAILY",
     ROUTINE: "DAILY",
-    CHRONIC: "DAILY",
+    CHRONIC: "PRESCRIPTION",
     "日常": "DAILY",
     "日常用药": "DAILY",
     "日常口服": "DAILY",
     "内服": "DAILY",
     "综合内服": "DAILY",
     "基础内服": "DAILY",
-    "2": "SYMPTOM",
-    BOX2: "SYMPTOM",
-    SYMPTOM: "SYMPTOM",
-    PRN: "SYMPTOM",
-    COMMON: "SYMPTOM",
-    "对症": "SYMPTOM",
-    "对症药品": "SYMPTOM",
-    "对症备用": "SYMPTOM",
-    "呼吸": "SYMPTOM",
-    "感冒呼吸": "SYMPTOM",
-    "感冒与呼吸": "SYMPTOM",
-    "3": "CARE",
-    BOX3: "CARE",
+    "2": "CARE",
+    BOX2: "CARE",
+    SYMPTOM: "DAILY",
+    PRN: "DAILY",
+    COMMON: "DAILY",
+    "对症": "DAILY",
+    "对症药品": "DAILY",
+    "对症备用": "DAILY",
+    "呼吸": "DAILY",
+    "感冒呼吸": "DAILY",
+    "感冒与呼吸": "DAILY",
+    "3": "PRESCRIPTION",
+    BOX3: "PRESCRIPTION",
+    PRESCRIPTION: "PRESCRIPTION",
+    "慢病": "PRESCRIPTION",
+    "处方": "PRESCRIPTION",
     CARE: "CARE",
     EXTERNAL: "CARE",
     TOPICAL: "CARE",
@@ -126,11 +150,17 @@ function explicitStorageBox(value) {
     "外用": "CARE",
     "外用护理": "CARE",
     "外用与护理": "CARE",
+    COLD: "COLD",
+    "冷藏": "COLD",
+    "冷藏药品": "COLD",
   };
   return aliases[normalized] || "";
 }
 
 function storageBoxId(medicine = {}) {
+  const known = knownMedicineFor(medicine);
+  if (known) return known.storageBox;
+
   const explicit = explicitStorageBox(
     medicine.storageBox
       || medicine.storage_box
@@ -141,19 +171,17 @@ function storageBoxId(medicine = {}) {
   );
   if (explicit) return explicit;
 
-  const known = knownMedicineFor(medicine);
-  if (known) return known.storageBox;
-
   const haystack = [medicine.name, medicine.category, medicine.tags].flat().map(text).join(" ");
   if (CARE_KEYWORDS.some(keyword => haystack.includes(keyword))) return "CARE";
+  if (PRESCRIPTION_KEYWORDS.some(keyword => haystack.includes(keyword))) return "PRESCRIPTION";
   if (DAILY_KEYWORDS.some(keyword => haystack.includes(keyword))) return "DAILY";
 
   const legacySlot = legacySlotFor(medicine);
-  return LEGACY_SLOT_BOX[legacySlot] || "SYMPTOM";
+  return LEGACY_SLOT_BOX[legacySlot] || "DAILY";
 }
 
 function storageBoxFor(medicine = {}) {
-  return STORAGE_BOX_BY_ID[storageBoxId(medicine)] || STORAGE_BOX_BY_ID.SYMPTOM;
+  return STORAGE_BOX_BY_ID[storageBoxId(medicine)] || STORAGE_BOX_BY_ID.DAILY;
 }
 
 function inventoryView(medicine = {}) {
@@ -245,8 +273,8 @@ function sortMedicines(medicines = []) {
   return medicines.slice().sort((left, right) => {
     const rank = attentionRank(left) - attentionRank(right);
     if (rank) return rank;
-    const boxRank = STORAGE_BOXES.findIndex(box => box.id === left.storageBox)
-      - STORAGE_BOXES.findIndex(box => box.id === right.storageBox);
+    const boxRank = STORAGE_LOCATION_ORDER.indexOf(left.storageBox)
+      - STORAGE_LOCATION_ORDER.indexOf(right.storageBox);
     if (boxRank) return boxRank;
     const displayRank = Number(left.displayOrder || 999) - Number(right.displayOrder || 999);
     if (displayRank) return displayRank;
@@ -280,10 +308,15 @@ function summarizeMedicineLibrary(rawMedicines = [], options = {}) {
     });
   });
   const available = medicines.filter(item => !item.isDepleted);
+  const coldMedicines = medicines.filter(item => item.storageBox === COLD_STORAGE.id);
   return {
     medicines,
     boxes,
+    coldMedicines,
+    coldStorage: COLD_STORAGE,
     medicineCount: medicines.length,
+    cabinetMedicineCount: medicines.length - coldMedicines.length,
+    coldStorageCount: coldMedicines.length,
     stockedCount: medicines.filter(item => item.isStocked).length,
     depletedCount: medicines.filter(item => item.isDepleted).length,
     inventoryUnknownCount: medicines.filter(item => item.isInventoryUnknown).length,
@@ -322,6 +355,7 @@ function filterMedicines(medicines = [], options = {}) {
 }
 
 module.exports = {
+  COLD_STORAGE,
   STORAGE_BOXES,
   decorateMedicine,
   explicitStorageBox,

@@ -60,7 +60,7 @@ CloudBase 环境：cloud1-d6gv6t2jf3f2c541c
 | 页面 | 路径 | 当前职责 |
 | --- | --- | --- |
 | 首页 | `pages/index/index` | 今日计划、用药提醒、需关注药品、最近体征、问询和风险动态 |
-| 三盒药库 | `pages/library/index` | 按综合内服、感冒呼吸、外用与护理展示当前 23 种药品 |
+| 三柜药库 | `pages/library/index` | 按日常高频内服、外用消毒护理、慢病处方储备展示 22 种普通药品，并单列冷藏药品 |
 | 药品清单 | `pages/libraryList/index` | 查看完整药品列表并按药盒、有效期和余量状态筛选 |
 | 用药风险 | `pages/medicationRisks/index` | 按人物与药品聚合风险，查看依据和建议 |
 | 健康测量 | `pages/vitals/index` | 查看最新体征，选择授权家庭成员后发起远程测量 |
@@ -84,15 +84,16 @@ pages/addMedicine/
 
 ## 4. 三盒药库逻辑
 
-三个实体药盒由 `miniprogram/utils/medicineLibrary.js` 定义：
+三个普通药柜和一个冷藏位置由 `miniprogram/utils/medicineLibrary.js` 定义：
 
 | storageBox | 用户名称 | 用途 |
 | --- | --- | --- |
-| `DAILY` | 综合内服 | 慢病、营养、胃肠与抗菌类内服药 |
-| `SYMPTOM` | 感冒呼吸 | 感冒、流感、咽喉、咳嗽、鼻炎与过敏药 |
-| `CARE` | 外用与护理 | 外用药、消毒用品和伤口护理 |
+| `DAILY` | 日常高频内服 | 感冒、发热、咳嗽、过敏与胃肠不适 |
+| `CARE` | 外用消毒护理 | 消毒、伤口、皮肤、鼻部与局部疼痛 |
+| `PRESCRIPTION` | 慢病处方储备 | 慢病、处方、固定用药与低频储备 |
+| `COLD` | 冷藏药品 | 冰箱冷藏，不占用普通药柜 |
 
-当前 23 种药品是现阶段正式药品基线，采用 `7 / 8 / 8` 分类。映射资料位于：
+当前 23 种药品是现阶段正式药品基线，采用普通药柜 `9 / 8 / 5` 加冷藏 `1` 分类。映射资料位于：
 
 ```text
 miniprogram/data/fixedMedicineCatalog.js
@@ -181,7 +182,7 @@ QSM368 Station
 Station 扫描药物溯源码
   -> 建立稳定 medicineId
   -> 识别药品资料与有效期
-  -> 归入 DAILY / SYMPTOM / CARE
+  -> 归入 DAILY / CARE / PRESCRIPTION / COLD
   -> CloudSyncWorker 上传 medicines 快照
   -> 小程序药库自动刷新
 ```

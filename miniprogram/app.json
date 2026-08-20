@@ -1,6 +1,7 @@
 {
   "pages": [
     "pages/index/index",
+    "pages/medicationPlans/index",
     "pages/library/index",
     "pages/libraryList/index",
     "pages/medicationRisks/index",

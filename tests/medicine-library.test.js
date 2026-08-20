@@ -7,38 +7,38 @@ const {
   summarizeMedicineLibrary,
 } = require("../miniprogram/utils/medicineLibrary");
 
-test("explicit three-box values win over legacy classification", () => {
-  assert.equal(storageBoxId({ name: "创口贴", storageBox: "DAILY" }), "DAILY");
+test("canonical medicine classification wins over an obsolete cloud box value", () => {
+  assert.equal(storageBoxId({ name: "创口贴", storageBox: "DAILY" }), "CARE");
   assert.equal(storageBoxId({ name: "维生素", storage_box: "CARE" }), "CARE");
-  assert.equal(storageBoxId({ name: "任意药品", box_type: "2" }), "SYMPTOM");
+  assert.equal(storageBoxId({ name: "任意药品", box_type: "2" }), "CARE");
 });
 
-test("the former 23 medicines are deterministically grouped into three boxes", () => {
-  assert.equal(storageBoxId({ slot: 2, name: "多维元素片" }), "DAILY");
-  assert.equal(storageBoxId({ slot: 4, name: "阿莫西林胶囊" }), "DAILY");
+test("the former 23 medicines are deterministically grouped into three ordinary boxes and cold storage", () => {
+  assert.equal(storageBoxId({ slot: 2, name: "多维元素片" }), "PRESCRIPTION");
+  assert.equal(storageBoxId({ slot: 4, name: "阿莫西林胶囊" }), "PRESCRIPTION");
   assert.equal(storageBoxId({ slot: 8, name: "藿香正气丸" }), "DAILY");
   assert.equal(storageBoxId({ slot: 12, name: "铝碳酸镁咀嚼片" }), "DAILY");
-  assert.equal(storageBoxId({ slot: 1, name: "复方感冒灵颗粒" }), "SYMPTOM");
+  assert.equal(storageBoxId({ slot: 1, name: "复方感冒灵颗粒" }), "DAILY");
+  assert.equal(storageBoxId({ slot: 9, name: "双歧杆菌三联活菌肠溶胶囊" }), "COLD");
   assert.equal(storageBoxId({ slot: 20, name: "创口贴" }), "CARE");
 });
 
 test("medicine names provide a safe compatibility classification when slots are absent", () => {
-  assert.equal(storageBoxId({ name: "苯磺酸氨氯地平片" }), "DAILY");
+  assert.equal(storageBoxId({ name: "苯磺酸氨氯地平片" }), "PRESCRIPTION");
   assert.equal(storageBoxId({ name: "莫匹罗星软膏" }), "CARE");
-  assert.equal(storageBoxId({ name: "感冒清热颗粒" }), "SYMPTOM");
+  assert.equal(storageBoxId({ name: "布洛芬缓释胶囊" }), "DAILY");
 });
 
 test("library summary counts expiry and explicit inventory facts without guessing low stock", () => {
   const summary = summarizeMedicineLibrary([
     { medicineId: "m-1", name: "长期药", storageBox: "DAILY", inventoryState: "STOCKED", expireDate: "2099-12" },
-    { medicineId: "m-2", name: "缺药", storageBox: "SYMPTOM", inventoryState: "DEPLETED", expireDate: "2099-12" },
+    { medicineId: "m-2", name: "缺药", storageBox: "CARE", inventoryState: "DEPLETED", expireDate: "2099-12" },
     { medicineId: "m-3", name: "护理药", storageBox: "CARE", inventoryState: "UNKNOWN", expireDate: "" },
   ]);
 
   assert.equal(summary.medicineCount, 3);
   assert.equal(summary.boxes.find(box => box.id === "DAILY").count, 1);
-  assert.equal(summary.boxes.find(box => box.id === "SYMPTOM").count, 1);
-  assert.equal(summary.boxes.find(box => box.id === "CARE").count, 1);
+  assert.equal(summary.boxes.find(box => box.id === "CARE").count, 2);
   assert.equal(summary.depletedCount, 1);
   assert.equal(summary.inventoryUnknownCount, 1);
 });
@@ -46,7 +46,7 @@ test("library summary counts expiry and explicit inventory facts without guessin
 test("library filters by box, attention state and medicine text", () => {
   const summary = summarizeMedicineLibrary([
     { medicineId: "m-1", name: "氨氯地平", storageBox: "DAILY", inventoryState: "STOCKED", expireDate: "2099-12" },
-    { medicineId: "m-2", name: "感冒灵", storageBox: "SYMPTOM", inventoryState: "DEPLETED", expireDate: "2099-12" },
+    { medicineId: "m-2", name: "感冒灵", storageBox: "DAILY", inventoryState: "DEPLETED", expireDate: "2099-12" },
     { medicineId: "m-3", name: "创口贴", storageBox: "CARE", inventoryState: "STOCKED", expireDate: "2099-12" },
   ]);
 

@@ -309,15 +309,15 @@ test("rapid reminder taps submit only one command and expose the in-flight state
 
   assert.equal(reminderCalls.length, 1);
   assert.equal(page.data.reminderSubmitting, true);
-  assert.equal(page.data.carePage.focus.action.disabled, true);
-  assert.equal(page.data.carePage.focus.action.label, "发送中…");
+  assert.equal(page.data.carePage.focus.activation, "surface");
+  assert.equal(page.data.carePage.focus.action.label, "查看计划用药");
 
   request.resolve({ _id: "reminder-one", status: "pending" });
   await Promise.all([first, second]);
 
   assert.equal(page.data.reminderSubmitting, false);
-  assert.equal(page.data.carePage.focus.action.disabled, false);
-  assert.equal(page.data.carePage.focus.action.label, "提醒张三");
+  assert.equal(page.data.carePage.focus.activation, "surface");
+  assert.equal(page.data.carePage.focus.action.label, "查看计划用药");
 });
 
 test("the dashboard retry action reloads a failed first snapshot", async () => {
@@ -581,12 +581,11 @@ test("the hero follows the highest care todo instead of an otherwise normal expi
 
   await page.load();
 
-  assert.equal(page.data.focusTitle, "09:00 pending");
+  assert.equal(page.data.focusTitle, "09:00 待提醒");
   assert.equal(page.data.heroLevel, "attention");
   assert.equal(page.data.heroBadge, "待提醒");
-  assert.equal(page.data.carePage.focus.action.id, "home.focus.remind");
-  assert.equal(page.data.carePage.focus.activation, "button");
-  assert.equal(page.data.carePage.focus.action.payload.planKey, "routine");
+  assert.equal(page.data.carePage.focus.action.id, "home.focus.plans");
+  assert.equal(page.data.carePage.focus.activation, "surface");
 });
 
 test("an urgent highest todo gives the hero an urgent visual state", async () => {
@@ -629,8 +628,8 @@ test("the home care screen leads with today's plan and moves medicine maintenanc
   await page.load();
 
   assert.equal(page.data.carePage.focus.title, "09:00 · 老人");
-  assert.equal(page.data.carePage.focus.activation, "button");
-  assert.equal(page.data.carePage.focus.action.id, "home.focus.remind");
+  assert.equal(page.data.carePage.focus.activation, "surface");
+  assert.equal(page.data.carePage.focus.action.id, "home.focus.plans");
   assert.equal(page.data.carePage.focus.progress.current, 0);
   assert.equal(page.data.carePage.focus.progress.total, 1);
   assert.equal(page.data.carePage.overview.length, 0);
@@ -858,8 +857,9 @@ test("the dashboard puts the next medication and daily progress in the focus car
   assert.equal(page.data.nextDoseText, "08:30 · 妈妈 · 降压药 · 1片");
   assert.equal(page.data.carePage.focus.title, "08:30 · 妈妈");
   assert.equal(page.data.carePage.focus.supporting, "降压药 · 1片");
-  assert.equal(page.data.carePage.focus.action.id, "home.focus.remind");
-  assert.equal(page.data.carePage.focus.action.label, "提醒妈妈");
+  assert.equal(page.data.carePage.focus.action.id, "home.focus.plans");
+  assert.equal(page.data.carePage.focus.action.label, "查看计划用药");
+  assert.equal(page.data.carePage.focus.activation, "surface");
   assert.deepEqual(page.data.carePage.focus.progress, {
     current: 0,
     total: 1,
@@ -1428,7 +1428,7 @@ test("an incomplete persona snapshot keeps legacy home visibility instead of ena
 
   assert.deepEqual(Array.from(page.data.planItems, item => item.id), ["plan-legacy-orphan-plan"]);
   assert.equal(page.data.inquiryCount, 1);
-  assert.equal(page.data.carePage.focus.action.id, "home.focus.remind");
+  assert.equal(page.data.carePage.focus.action.id, "home.focus.plans");
   const attention = page.data.carePage.sections.find(section => section.key === "home-attention");
   assert.equal(attention.items.find(item => item.key === "home-attention-safety").action.id, "home.risks");
 });

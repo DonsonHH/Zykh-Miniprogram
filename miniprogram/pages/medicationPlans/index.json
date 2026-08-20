@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "计划用药提醒",
+  "usingComponents": {
+    "app-header": "/components/appHeader/index"
+  }
+}

@@ -1,0 +1,263 @@
+.medication-plans-page {
+  padding-top: 20rpx;
+  padding-bottom: calc(72rpx + env(safe-area-inset-bottom));
+}
+
+.plans-phase {
+  min-height: 240rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 40rpx 28rpx;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.plans-phase__title {
+  color: #172033;
+  font-size: 32rpx;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.plans-phase__text {
+  max-width: 560rpx;
+  margin-top: 12rpx;
+  color: #637083;
+  font-size: 27rpx;
+  font-weight: 600;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.plans-spinner {
+  width: 42rpx;
+  height: 42rpx;
+  margin-bottom: 20rpx;
+  border: 5rpx solid #dce8f6;
+  border-top-color: #2563eb;
+  border-radius: 50%;
+  box-sizing: border-box;
+  animation: plans-spinner 720ms linear infinite;
+}
+
+@keyframes plans-spinner {
+  to { transform: rotate(360deg); }
+}
+
+.plans-retry {
+  min-width: 220rpx;
+  min-height: 78rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 24rpx;
+  padding: 0 26rpx;
+  border-radius: 18rpx;
+  color: #ffffff;
+  background: #2563eb;
+  font-size: 27rpx;
+  font-weight: 850;
+}
+
+.plans-summary {
+  padding: 24rpx 22rpx 20rpx;
+  box-sizing: border-box;
+  box-shadow: 0 10rpx 24rpx rgba(15, 35, 70, 0.06);
+}
+
+.plans-summary__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16rpx;
+}
+
+.plans-summary__title {
+  min-width: 0;
+  color: #172033;
+  font-size: 30rpx;
+  font-weight: 900;
+  line-height: 1.35;
+}
+
+.plans-summary__updated {
+  flex: 0 0 auto;
+  color: #637083;
+  font-size: 24rpx;
+  font-weight: 650;
+}
+
+.plans-summary__grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-top: 22rpx;
+  border-top: 1rpx solid #e8eef5;
+}
+
+.plans-summary__item {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 20rpx 8rpx 8rpx;
+  border-right: 1rpx solid #e8eef5;
+  box-sizing: border-box;
+}
+
+.plans-summary__item:last-child {
+  border-right: 0;
+}
+
+.plans-summary__value {
+  font-size: 42rpx;
+  font-weight: 900;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+
+.plans-summary__label {
+  margin-top: 8rpx;
+  color: #52627a;
+  font-size: 25rpx;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.plans-summary__item--good .plans-summary__value { color: #087c68; }
+.plans-summary__item--warn .plans-summary__value { color: #a65d0a; }
+.plans-summary__item--notice .plans-summary__value { color: #2563eb; }
+
+.plans-list {
+  overflow: hidden;
+  margin-top: 24rpx;
+}
+
+.plan-row {
+  min-height: 150rpx;
+  display: flex;
+  align-items: center;
+  gap: 18rpx;
+  padding: 22rpx 20rpx;
+  border-bottom: 1rpx solid #e8eef5;
+  box-sizing: border-box;
+}
+
+.plan-row:last-child {
+  border-bottom: 0;
+}
+
+.plan-row__time {
+  flex: 0 0 92rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  color: #172033;
+}
+
+.plan-row__time text:first-child {
+  font-size: 29rpx;
+  font-weight: 900;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-row__time text:last-child {
+  max-width: 92rpx;
+  margin-top: 6rpx;
+  overflow: hidden;
+  color: #637083;
+  font-size: 24rpx;
+  font-weight: 650;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-row__copy {
+  min-width: 0;
+  flex: 1;
+}
+
+.plan-row__person,
+.plan-row__medicine,
+.plan-row__dose,
+.plan-row__hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.plan-row__person {
+  color: #172033;
+  font-size: 29rpx;
+  font-weight: 900;
+  line-height: 1.3;
+}
+
+.plan-row__medicine {
+  margin-top: 5rpx;
+  color: #40516b;
+  font-size: 27rpx;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.plan-row__dose {
+  margin-top: 4rpx;
+  color: #637083;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.plan-row__hint {
+  margin-top: 7rpx;
+  color: #637083;
+  font-size: 24rpx;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.plan-row__status {
+  flex: 0 0 auto;
+  min-width: 96rpx;
+  min-height: 50rpx;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 12rpx;
+  border-radius: 999rpx;
+  box-sizing: border-box;
+  font-size: 24rpx;
+  font-weight: 850;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.plan-row--taken .plan-row__status {
+  color: #087c68;
+  background: #e8f7f2;
+}
+
+.plan-row--remind .plan-row__status {
+  color: #94510a;
+  background: #fff2df;
+}
+
+.plan-row--not_due .plan-row__status {
+  color: #174fd6;
+  background: #e9f1ff;
+}
+
+.plans-empty {
+  margin-top: 24rpx;
+  padding: 48rpx 26rpx;
+  color: #637083;
+  font-size: 27rpx;
+  font-weight: 650;
+  line-height: 1.5;
+  text-align: center;
+}

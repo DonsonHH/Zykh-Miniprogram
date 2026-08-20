@@ -23,8 +23,9 @@
 .library-row { min-height: 148rpx; gap: 14rpx; padding: 20rpx; }
 .library-box-symbol { flex: 0 0 56rpx; width: 56rpx; height: 56rpx; display: flex; align-items: center; justify-content: center; border-radius: 18rpx; color: #174fd6; background: #eaf2ff; font-size: 26rpx; font-weight: 900; }
 .library-box-symbol--DAILY { color: #174fd6; background: #eaf2ff; }
-.library-box-symbol--SYMPTOM { color: #087c68; background: #e8f7f2; }
 .library-box-symbol--CARE { color: #8b570f; background: #fff4e4; }
+.library-box-symbol--PRESCRIPTION { color: #7a4db3; background: #f2eaff; }
+.library-box-symbol--COLD { color: #087c68; background: #e8f7f2; }
 .library-box-symbol--large { flex-basis: 76rpx; width: 76rpx; height: 76rpx; border-radius: 22rpx; font-size: 32rpx; }
 .library-row__meta { margin-top: 6rpx; color: #637083; font-size: 24rpx; font-weight: 650; line-height: 1.35; }
 .library-row__right { flex: 0 0 180rpx; text-align: right; }

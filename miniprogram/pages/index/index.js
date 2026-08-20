@@ -1,13 +1,14 @@
 const api = require("../../utils/api");
 const realtime = require("../../utils/realtime");
 const { summarizeExpiry } = require("../../utils/expiry");
+const planStatus = require("../../utils/carePlan");
 const {
   isDoneStatus,
   isSkippedStatus,
   isPlanDueToday,
   isPlanActionable,
   planTimeValue,
-} = require("../../utils/carePlan");
+} = planStatus;
 const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
 const medicineLibrary = require("../../utils/medicineLibrary");
 const deviceSession = require("../../utils/deviceSession");
@@ -324,16 +325,19 @@ function homeCarePage(state = {}) {
     focusSupporting = [reminderMedicine, reminderDose].filter(Boolean).join(" · ");
     focusState = { kind: "pending", label: "待提醒" };
     focusAction = {
-      id: "home.focus.remind",
-      label: state.reminderSubmitting ? "发送中…" : `提醒${reminderPerson}`,
-      payload: { planKey: reminderKey },
-      disabled: Boolean(state.reminderSubmitting),
+      id: "home.focus.plans",
+      label: "查看计划用药",
     };
-    focusActivation = "button";
+    focusActivation = "surface";
   } else if (todayPlanTotal > 0) {
     focusTitle = "今天的用药计划已完成";
     focusSupporting = `${todayPlanTotal} 次计划均已确认。`;
     focusState = { kind: "normal", label: "已完成" };
+    focusAction = {
+      id: "home.focus.plans",
+      label: "查看计划用药",
+    };
+    focusActivation = "surface";
   } else if (!deviceOnline) {
     focusTitle = "照护信息等待更新";
     focusSupporting = "家庭药箱重新连接后，今日计划会自动同步。";
@@ -544,6 +548,8 @@ Page({
     todoItems: [],
     todoPreview: [],
     planItems: [],
+    todayPlanViews: [],
+    planStatusCounts: { total: 0, taken: 0, remind: 0, notDue: 0 },
     todayPlanTotal: 0,
     todayPlanCompleted: 0,
     todayPlanPendingCount: 0,
@@ -631,6 +637,8 @@ Page({
         todoItems: [],
         todoPreview: [],
         planItems: [],
+        todayPlanViews: [],
+        planStatusCounts: { total: 0, taken: 0, remind: 0, notDue: 0 },
         todayPlanTotal: 0,
         todayPlanCompleted: 0,
         todayPlanPendingCount: 0,
@@ -720,8 +728,12 @@ Page({
       const todayPlans = sortedPlans(plans.filter(plan => (
         isPlanDueToday(plan) && !isSkippedStatus(plan.status)
       )));
+      const todayPlanViews = todayPlans.map(plan => planStatus.buildPlanView(plan));
+      const planStatusCounts = planStatus.summarizePlanViews(todayPlanViews);
       const pendingPlans = todayPlans.filter(isPlanActionable);
-      const completedPlans = todayPlans.filter(plan => isDoneStatus(plan.status));
+      const completedPlans = todayPlans.filter(plan => (
+        planStatus.executionStatus(plan) === planStatus.PLAN_STATUS.TAKEN
+      ));
       const hasFixedCatalogSnapshot = Array.isArray(medicines)
         && medicines.some(item => item && item.fixedCatalogMatch === true);
       const medicineSummary = medicineLibrary.summarizeMedicineLibrary(medicines || [], {
@@ -742,11 +754,11 @@ Page({
           id: `plan-${plan.id || plan._id || plan.time}`,
           planKey: planKey(plan),
           icon: "药",
-          title: planTodoTitle(plan),
+          title: `${String(plan.time || "--:--").slice(0, 5)} ${planStatus.statusView(planStatus.executionStatus(plan)).label}`,
           desc: planTodoDesc(plan),
           level: planTodoLevel(plan),
           action: "remind",
-          actionLabel: "提醒",
+          actionLabel: "查看计划",
           heroBadge: "待提醒",
         });
       });
@@ -875,10 +887,12 @@ Page({
         todayPlanTotal: todayPlans.length,
         todayPlanCompleted: completedPlans.length,
         todayPlanPendingCount: pendingPlans.length,
+        todayPlanViews,
+        planStatusCounts,
         nextDoseText,
-        todayPlanNote: planItems.length
-          ? `今日还有 ${planItems.length} 项待执行，提醒由药箱播报`
-          : "今天没有待执行用药",
+        todayPlanNote: planStatusCounts.remind
+          ? `今日有 ${planStatusCounts.remind} 项计划待提醒`
+          : (planStatusCounts.notDue ? `还有 ${planStatusCounts.notDue} 项未到时间` : "今日计划已完成"),
         timeline,
         timelinePreview: timeline.slice(0, 2),
         reminderPlan: pendingPlans[0] || {},
@@ -1035,8 +1049,8 @@ Page({
       this.showTodoDetails();
     } else if (id === "home.focus.medicine") {
       this.openMedicineList(payload);
-    } else if (id === "home.focus.remind") {
-      this.sendMedicineReminder((this._reminderPlansByKey || {})[payload.planKey]);
+    } else if (id === "home.focus.plans" || id === "home.focus.remind") {
+      this.openMedicationPlans();
     } else if (id === "home.focus.connection") {
       this.goSettings();
     } else if (id === "home.focus.safety") {
@@ -1048,7 +1062,7 @@ Page({
     } else if (id.indexOf("home.cabinet.") === 0) {
       this.openMedicineList({ filter: payload.filter || "all" });
     } else if (id.indexOf("home.remind.") === 0) {
-      this.sendMedicineReminder((this._reminderPlansByKey || {})[payload.planKey]);
+      this.openMedicationPlans();
     } else if (id === "home.vitals") {
       this.goVitals();
     } else if (id === "home.timeline") {
@@ -1067,7 +1081,7 @@ Page({
     const reminderKey = e.currentTarget.dataset.planKey || "";
     this.closeDetail();
     if (action === "remind") {
-      this.sendMedicineReminder((this._reminderPlansByKey || {})[reminderKey]);
+      this.openMedicationPlans();
     } else if (action === "medicine") {
       this.openMedicineList({ box, filter: filter || "attention" });
     } else if (action === "safety") {
@@ -1108,6 +1122,10 @@ Page({
 
   goVitals() {
     wx.navigateTo({ url: "/pages/vitals/index" });
+  },
+
+  openMedicationPlans() {
+    wx.navigateTo({ url: "/pages/medicationPlans/index" });
   },
 
   goAi() {

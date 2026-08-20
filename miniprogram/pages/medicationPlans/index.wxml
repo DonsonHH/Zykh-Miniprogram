@@ -1,0 +1,69 @@
+<view class="page care-page medication-plans-page">
+  <app-header
+    title="计划用药提醒"
+    subtitle="{{headerSubtitle}}"
+    online="{{deviceOnline}}"
+    show-status="true"
+  />
+
+  <view wx:if="{{phase === 'loading'}}" class="plans-phase ui-surface">
+    <view class="plans-spinner"></view>
+    <view class="plans-phase__text">{{phaseMessage}}</view>
+  </view>
+
+  <view wx:elif="{{phase === 'error'}}" class="plans-phase ui-surface">
+    <view class="plans-phase__title">暂时无法显示</view>
+    <view class="plans-phase__text">{{phaseMessage}}</view>
+    <view class="plans-retry" bindtap="retry" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="重新读取计划">重新读取</view>
+  </view>
+
+  <view wx:elif="{{phase === 'empty'}}" class="plans-phase ui-surface">
+    <view class="plans-phase__title">还没有计划用药</view>
+    <view class="plans-phase__text">{{phaseMessage}}</view>
+  </view>
+
+  <block wx:else>
+    <view class="plans-summary ui-surface">
+      <view class="plans-summary__head">
+        <view class="plans-summary__title">{{dateText}} · 今日安排</view>
+        <view wx:if="{{lastUpdatedText}}" class="plans-summary__updated">{{lastUpdatedText}}</view>
+      </view>
+      <view class="plans-summary__grid">
+        <view class="plans-summary__item plans-summary__item--good">
+          <text class="plans-summary__value">{{counts.taken}}</text>
+          <text class="plans-summary__label">已取药</text>
+        </view>
+        <view class="plans-summary__item plans-summary__item--warn">
+          <text class="plans-summary__value">{{counts.remind}}</text>
+          <text class="plans-summary__label">待提醒</text>
+        </view>
+        <view class="plans-summary__item plans-summary__item--notice">
+          <text class="plans-summary__value">{{counts.notDue}}</text>
+          <text class="plans-summary__label">未取药</text>
+        </view>
+      </view>
+    </view>
+
+    <view wx:if="{{plans.length}}" class="plans-list ui-surface">
+      <view
+        wx:for="{{plans}}"
+        wx:key="planKey"
+        class="plan-row plan-row--{{item.statusKind}}"
+        aria-label="{{item.timeText}}，{{item.personName}}，{{item.medicineName}}，{{item.statusLabel}}"
+      >
+        <view class="plan-row__time">
+          <text>{{item.timeText}}</text>
+          <text wx:if="{{item.timing_label}}">{{item.timing_label}}</text>
+        </view>
+        <view class="plan-row__copy">
+          <view class="plan-row__person">{{item.personName}}</view>
+          <view class="plan-row__medicine">{{item.medicineName}}</view>
+          <view wx:if="{{item.doseText}}" class="plan-row__dose">{{item.doseText}}</view>
+          <view class="plan-row__hint">{{item.statusHint}}</view>
+        </view>
+        <view class="plan-row__status">{{item.statusLabel}}</view>
+      </view>
+    </view>
+    <view wx:else class="plans-empty ui-surface">今天暂未同步计划用药。</view>
+  </block>
+</view>
