@@ -84,8 +84,8 @@ button::after {
 }
 
 .care-focus--pending {
-  border-color: #f2d4a8;
-  background: linear-gradient(145deg, #ffffff 0%, #fff8ec 100%);
+  border-color: #b9dfe2;
+  background: linear-gradient(145deg, #ffffff 0%, #eef9f8 100%);
 }
 
 .care-focus--normal {
@@ -128,7 +128,7 @@ button::after {
 .care-eyebrow {
   min-width: 0;
   color: #52627a;
-  font-size: 25rpx;
+  font-size: 28rpx;
   font-weight: 700;
   line-height: 1.3;
 }
@@ -151,6 +151,43 @@ button::after {
   line-height: 1.5;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
+}
+
+.care-focus__progress {
+  margin-top: 24rpx;
+}
+
+.care-focus__progress-copy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20rpx;
+  color: #40516b;
+  font-size: 26rpx;
+  font-weight: 750;
+  line-height: 1.3;
+}
+
+.care-focus__progress-copy text:last-child {
+  flex: 0 0 auto;
+  color: #087c68;
+  font-size: 28rpx;
+  font-variant-numeric: tabular-nums;
+}
+
+.care-focus__progress-track {
+  height: 14rpx;
+  margin-top: 12rpx;
+  overflow: hidden;
+  border-radius: 999rpx;
+  background: #dce8ef;
+}
+
+.care-focus__progress-value {
+  min-width: 8rpx;
+  height: 100%;
+  border-radius: inherit;
+  background: #14968b;
 }
 
 .care-primary {

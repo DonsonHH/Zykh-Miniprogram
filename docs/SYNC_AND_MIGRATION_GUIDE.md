@@ -1,6 +1,6 @@
 # 智药康护小程序同步与迁移指南
 
-本文档只对应新版 `DonsonHH/Zykh-QSM` 的同步方案：板端同步由 `zykh_station_app` 内置的 `CloudSyncWorker` 执行，不再使用本项目旧版 `qsm_agent.pl`。
+本文档对应 `zykh_station_app` 内置 `CloudSyncWorker` 的联网方案，不再使用本项目旧版 `qsm_agent.pl`。药品数据结构已经切换为三盒药库；先阅读 [THREE_BOX_MIGRATION.md](THREE_BOX_MIGRATION.md)。
 
 ## 1. 同步链路
 
@@ -8,7 +8,7 @@
 微信小程序
   -> 云函数 api / CloudBase 数据库
   -> QSM368 zykh_station_app CloudSyncWorker
-  -> 板端本地服务与硬件能力
+  -> 板端本地服务、溯源码入库与现场记录
 ```
 
 小程序不会直接访问板子的局域网地址。板子通过 `CloudSyncWorker` 主动访问云函数 HTTP 入口，拉取 `commands` 并上传快照数据。
@@ -19,10 +19,11 @@
 - `AUDIO_BEEP`：提示音兼容命令，只保留历史/调试兼容
 - `READ_VITALS_ALL`：远程测量体征
 - `AI_CHAT`：AI 问诊
-- `UPSERT_MEDICINE`：补药信息同步
+- `UPSERT_MEDICINE`：旧客户端兼容；新流程不使用
 - `UPSERT_SERVICE_USER`：服务对象同步
 - `UPSERT_TODAY_PLAN`：今日用药计划同步
-- `OPEN_CABINET`：远程开柜，默认需要板端开启安全开关
+
+新版不支持 `OPEN_CABINET`、`DISPENSE` 或舵机出药。药品由 Station 扫描入库，再通过 `UPLOAD_MEDICINES`、`UPLOAD_SNAPSHOT` 或批次快照上传。
 
 用药提醒必须使用 `AUDIO_SPEAK`，payload 至少包含：
 
@@ -98,10 +99,10 @@ FINALIZE_SNAPSHOT
 1. 第二块板部署最新版 `Zykh-QSM`。
 2. 给第二块板设置独立设备号，例如 `zykh-qsm-002`。
 3. 云函数环境变量里加入第二块板密钥。
-4. 在小程序设置页切换药箱编号为 `zykh-qsm-002`。
+4. 由第二块板签发一次性配对码，在小程序“家人”页完成账号授权并选择 `zykh-qsm-002`。
 5. 等待板端上报 `devices.lastSeenAt`，小程序会根据最近 60 秒心跳判断在线。
 6. 先测试“测试语音提醒”，确认 `commands` 中 `AUDIO_SPEAK` 从 `pending/running` 变为 `done`。
-7. 再测试首页“提醒用药”、AI 问诊、记录同步。
+7. 再测试首页“提醒用药”、AI 问询、三盒药库和记录同步。
 
 ## 6. 排障顺序
 

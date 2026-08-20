@@ -1,5 +1,7 @@
 # 药箱端同步升级交接
 
+> **旧版文档，仅供追溯。** 本文描述 23 个物理仓位和 `UPSERT_MEDICINE` 维护流程，已经被取消，不能用于当前部署。当前实现请阅读 `docs/THREE_BOX_MIGRATION.md` 与 `docs/SYNC_AND_MIGRATION_GUIDE.md`。
+
 ## 当前状态
 
 小程序已经改为**只**创建 `UPSERT_MEDICINE` 命令，不再直接写 CloudBase 的

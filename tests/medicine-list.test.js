@@ -310,24 +310,26 @@ test("the full list registers into the first empty slot and hides registration w
   assert.match(layout, /wx:if="\{\{primarySlot\}\}"[^>]*class="cabinet-primary"/);
 });
 
-test("cabinet tab fills its compact overview before leaving the full list to the secondary page", () => {
+test("three-box library ships a compact overview and a dedicated full list", () => {
   const app = JSON.parse(fs.readFileSync(path.join(root, "miniprogram/app.json"), "utf8"));
-  const overview = fs.readFileSync(path.join(root, "miniprogram/pages/cabinet/index.wxml"), "utf8");
-  const overviewLogic = fs.readFileSync(path.join(root, "miniprogram/pages/cabinet/index.js"), "utf8");
-  const overviewConfig = JSON.parse(fs.readFileSync(path.join(root, "miniprogram/pages/cabinet/index.json"), "utf8"));
-  const list = fs.readFileSync(path.join(root, "miniprogram/pages/medicineList/index.wxml"), "utf8");
+  const overview = fs.readFileSync(path.join(root, "miniprogram/pages/library/index.wxml"), "utf8");
+  const overviewLogic = fs.readFileSync(path.join(root, "miniprogram/pages/library/index.js"), "utf8");
+  const overviewConfig = JSON.parse(fs.readFileSync(path.join(root, "miniprogram/pages/library/index.json"), "utf8"));
+  const list = fs.readFileSync(path.join(root, "miniprogram/pages/libraryList/index.wxml"), "utf8");
 
-  assert.ok(app.pages.includes("pages/medicineList/index"));
+  assert.ok(app.pages.includes("pages/library/index"));
+  assert.ok(app.pages.includes("pages/libraryList/index"));
+  assert.equal(app.pages.includes("pages/cabinet/index"), false);
+  assert.equal(app.pages.includes("pages/medicineList/index"), false);
   assert.equal(overviewConfig.usingComponents["care-screen"], "/components/careScreen/index");
   assert.match(overview, /<care-screen model="\{\{carePage\}\}" bind:action="onCarePageAction"\s*\/>/);
-  assert.match(overviewLogic, /items:\s*summary\.overviewSlots\.map/);
-  assert.match(overviewLogic, /detailAction:\s*\{[\s\S]*?id:\s*"cabinet\.all"/);
-  assert.match(overviewLogic, /fact\("cabinet\.expired"/);
-  assert.match(overviewLogic, /fact\("cabinet\.depleted"/);
-  assert.doesNotMatch(overview, /class="cabinet-tools/);
-  assert.doesNotMatch(overview, /wx:for="\{\{viewSlots\}\}"/);
-  assert.match(list, /class="cabinet-tools/);
-  assert.match(list, /wx:for="\{\{viewSlots\}\}"/);
+  assert.match(overviewLogic, /items:\s*\(summary\.boxes \|\| \[\]\)\.map/);
+  assert.match(overviewLogic, /detailAction:\s*summary\.medicineCount/);
+  assert.match(overviewLogic, /id:\s*"library\.all"/);
+  assert.match(overviewLogic, /id:\s*"library\.attention"/);
+  assert.doesNotMatch(`${overview}\n${overviewLogic}`, /OPEN_CABINET|DISPENSE|23\s*仓/);
+  assert.match(list, /wx:for="\{\{viewMedicines\}\}"/);
+  assert.match(list, /storageBoxLabel/);
 });
 
 test("cabinet overview and medicine list remove duplicated explanatory copy", () => {

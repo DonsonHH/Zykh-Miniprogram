@@ -1,0 +1,3 @@
+<view class="page care-page library-page">
+  <care-screen model="{{carePage}}" bind:action="onCarePageAction" />
+</view>

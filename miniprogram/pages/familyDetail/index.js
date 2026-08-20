@@ -140,13 +140,13 @@ function projectSafety(events = []) {
   return medicationSafetyEventModule.projectRecords(events).map((event, index) => ({
     key: `family-safety-${text(event.id, index)}`,
     symbol: "safety",
-    title: text(event.title, "安全核查记录"),
+    title: text(event.title, "用药风险记录"),
     supporting: [text(event.summary), text(event.subtitle)].filter(Boolean).join(" · "),
     meta: [timeLabel(event.occurredAt), event.readState === "UNREAD" ? "未读" : "已读"].filter(Boolean).join(" · "),
     state: event.state,
     action: text(event.id) ? {
       id: `family.person.safety.open.${text(event.id)}`,
-      label: "查看安全核查详情",
+      label: "查看用药风险详情",
       payload: { eventId: text(event.id) },
     } : null,
   }));
@@ -202,7 +202,7 @@ function reconcileSafetyRefresh(previous = {}, next = {}, deviceId = "") {
 function safetySupporting(state = {}, eventCount = 0, loadMoreError = "") {
   if (loadMoreError) return `${eventCount} 条安全记录 · ${loadMoreError}`;
   if (state.availability !== "ready") return state.message || "暂时无法确认安全记录是否为最新";
-  if (!eventCount) return "暂无该身份版本的安全核查记录";
+  if (!eventCount) return "暂无该家庭成员的用药风险记录";
   return state.nextCursor ? `已显示 ${eventCount} 条，还有更多记录` : `已显示全部 ${eventCount} 条记录`;
 }
 
@@ -229,7 +229,7 @@ function buildPersonCarePage({ scope = {}, user = {}, device = {}, plans = [], i
     overview: [
       { key: "family-person-plan-count", label: "今日计划", value: todayPlanCount, state: todayPlanCount ? "pending" : "muted" },
       { key: "family-person-inquiry-count", label: "窗口内问询", value: inquiries.length, state: inquiries.length ? "actionable" : "muted" },
-      { key: "family-person-safety-count", label: "安全记录", value: safetyCountValue, state: safetyRows.length ? "actionable" : "muted" },
+      { key: "family-person-safety-count", label: "用药风险", value: safetyCountValue, state: safetyRows.length ? "actionable" : "muted" },
       { key: "family-person-vitals-count", label: "窗口内测量", value: vitals.length, state: vitals.length ? "normal" : "muted" },
     ],
     sections: [
@@ -252,9 +252,9 @@ function buildPersonCarePage({ scope = {}, user = {}, device = {}, plans = [], i
       {
         key: "family-person-safety",
         intent: "timeline",
-        title: "安全核查记录",
+        title: "用药风险",
         supporting: safetySupporting(safetyState, safetyRows.length, safetyLoadMoreError),
-        empty: safetyState.message || "暂无该身份版本的安全核查记录。",
+        empty: safetyState.message || "暂无该家庭成员的用药风险记录。",
         items: safetyRows,
         more: safetyState.availability === "ready" && safetyState.nextCursor ? {
           id: "family.person.safety.more",

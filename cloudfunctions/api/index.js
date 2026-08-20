@@ -8,7 +8,7 @@ const { createMembershipModule } = require("./memberships");
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 const db = cloud.database();
-const schemaRevision = "2.7-runtime-consistency";
+const schemaRevision = "3.0-three-box-library";
 const capabilities = Object.freeze({
   medicationSafetyEvents: "v1",
   caregiverMembership: "v1",
@@ -19,6 +19,9 @@ const capabilities = Object.freeze({
   caregiverNotificationOutbox: "v1",
   caregiverNotificationWorker: "v1",
   explicitInventoryState: "v1",
+  medicineStorageBoxes: "v1",
+  manualMedicationUse: "v1",
+  medicationRiskRegistry: "v1",
   personaLifecycle: "v1",
   vitalsAttribution: "v1",
 });
@@ -336,6 +339,22 @@ function safeId(value) {
   return String(value || "unknown").replace(/[^A-Za-z0-9_.-]/g, "-");
 }
 
+function medicineSnapshotId(deviceId, row = {}) {
+  const identity = firstPresent(
+    row.medicineId,
+    row.medicine_id,
+    row.traceCode,
+    row.trace_code,
+    row.barcode,
+    row.code,
+    row.id,
+    row._id,
+    row.slot || row.hardware_slot ? `legacy-slot-${row.slot || row.hardware_slot}` : null,
+    `${row.name || "medicine"}-${row.expireDate || row.expire_date || "unknown"}-${row.spec || ""}`,
+  );
+  return `${deviceId}-medicine-${safeId(identity)}`;
+}
+
 function serviceUserSnapshotId(deviceId, row = {}) {
   const serviceUserId = firstPresent(
     row.id,
@@ -451,12 +470,27 @@ function validateMedicineCommand(payload = {}) {
     ...slotValues,
   );
   const slot = Number(slotField);
-  if (!Number.isInteger(slot) || slot < 1 || slot > 23) throw new Error("medicine slot must be between 1 and 23");
+  if (slotField !== null && slotField !== "" && (!Number.isInteger(slot) || slot < 1)) {
+    throw new Error("legacy medicine slot must be a positive integer");
+  }
+  const medicineIdentity = firstPresent(
+    payload.medicineId,
+    payload.medicine_id,
+    source.medicineId,
+    source.medicine_id,
+    payload.traceCode,
+    payload.trace_code,
+    source.traceCode,
+    source.trace_code,
+    slotField,
+  );
+  if (!medicineIdentity) throw new Error("medicine identity required");
 
   const allowedPatchFields = new Set([
     "name", "manufacturer", "barcode", "code", "category", "spec", "trace_code", "traceCode",
     "stock", "quantity", "low_stock_line", "lowStockLine", "unit", "expire_date", "expireDate",
     "expiryPrecision", "hardware_slot", "hardwareSlot", "slot",
+    "medicineId", "medicine_id", "storageBox", "storage_box", "boxType", "box_type",
     "aliases", "active_ingredients", "structured_contraindications", "safety_review_status",
   ]);
   if (operation === "patch") {
@@ -1050,7 +1084,7 @@ async function uploadMedicines(data) {
     collections.medicines,
     data.deviceId,
     data.medicines || [],
-    row => `${data.deviceId}-slot-${Number(row.slot || row.hardware_slot || 0)}`,
+    row => medicineSnapshotId(data.deviceId, row),
   );
   return { count };
 }
@@ -1082,7 +1116,7 @@ async function uploadSnapshot(data) {
   const snapshot = data.snapshot || {};
   const counts = {};
   if (Object.prototype.hasOwnProperty.call(snapshot, "medicines")) {
-    counts.medicines = await replaceDeviceRows(collections.medicines, deviceId, snapshot.medicines || [], row => `${deviceId}-slot-${Number(row.slot || row.hardware_slot || 0)}`);
+    counts.medicines = await replaceDeviceRows(collections.medicines, deviceId, snapshot.medicines || [], row => medicineSnapshotId(deviceId, row));
   }
   if (Object.prototype.hasOwnProperty.call(snapshot, "serviceUsers")) {
     counts.serviceUsers = await replaceDeviceRows(
@@ -1110,7 +1144,7 @@ async function uploadSnapshot(data) {
 
 function snapshotKind(kind, deviceId) {
   const map = {
-    medicines: [collections.medicines, row => `${deviceId}-slot-${Number(row.slot || row.hardware_slot || 0)}`],
+    medicines: [collections.medicines, row => medicineSnapshotId(deviceId, row)],
     serviceUsers: [collections.serviceUsers, row => serviceUserSnapshotId(deviceId, row)],
     plans: [collections.plans, row => `${deviceId}-plan-${safeId(row.id)}`],
     inquiries: [collections.inquiries, row => `${deviceId}-inquiry-${safeId(row.inquiry_id || row.session_id || row.id)}`],
@@ -1589,7 +1623,7 @@ async function handleAction(payload, wxContext, isHttp = false) {
         return null;
       }
     }
-    case "LIST_MEDICINES": return listRows(collections.medicines, data.deviceId, data.limit, "slot", "asc");
+    case "LIST_MEDICINES": return listRows(collections.medicines, data.deviceId, data.limit, "updatedAt", "desc");
     case "GET_LATEST_VITALS": return (
       await listVitals(Object.assign({}, data, { limit: 1 }), readMembership)
     )[0] || null;

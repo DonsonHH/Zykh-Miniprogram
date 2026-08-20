@@ -88,6 +88,7 @@ function loadHomePage(snapshot, vitals = [], wx = {}, medicines = [], expirySumm
       }
       if (modulePath.includes("utils/carePage")) return require("../miniprogram/utils/carePage");
       if (modulePath.includes("utils/carePlan")) return require("../miniprogram/utils/carePlan");
+      if (modulePath.includes("utils/medicineLibrary")) return require("../miniprogram/utils/medicineLibrary");
       if (modulePath.includes("utils/cabinetView")) return require("../miniprogram/utils/cabinetView");
       if (modulePath.includes("modules/medicationSafetyEvents")) {
         return require("../miniprogram/modules/medicationSafetyEvents");
@@ -121,7 +122,6 @@ test("the dashboard exposes a retry action when any first strict read fails", as
   const strictReads = [
     "getDeviceStrict",
     "getMedicinesStrict",
-    "getRecentRecordsStrict",
     "getRecentCommandsStrict",
     "getSnapshotStrict",
     "getRecentVitalsStrict",
@@ -147,6 +147,29 @@ test("the dashboard exposes a retry action when any first strict read fails", as
     assert.equal(page.data.carePage.phase.kind, "error", method);
     assert.equal(page.data.carePage.phase.action.id, "home.retry", method);
   }
+});
+
+test("the dashboard never reads legacy dispense records", async () => {
+  let legacyRecordReads = 0;
+  const page = loadHomePage(
+    { plans: [], inquiries: [] },
+    [],
+    {},
+    [],
+    null,
+    { online: true },
+    {
+      getRecentRecordsStrict: async () => {
+        legacyRecordReads += 1;
+        return [{ id: "legacy-dispense", type: "DISPENSE" }];
+      },
+    },
+  );
+
+  await page.load();
+
+  assert.equal(legacyRecordReads, 0);
+  assert.equal(page.data.timeline.some(item => item.source === "record"), false);
 });
 
 test("the dashboard keeps its last care snapshot and marks it stale when a refresh fails", async () => {
@@ -254,6 +277,7 @@ test("rapid reminder taps submit only one command and expose the in-flight state
         id: "morning-dose",
         time: "09:00",
         medicine: "降压药",
+        target_user_name: "张三",
         status: "pending",
         due_today: true,
       }],
@@ -293,7 +317,7 @@ test("rapid reminder taps submit only one command and expose the in-flight state
 
   assert.equal(page.data.reminderSubmitting, false);
   assert.equal(page.data.carePage.focus.action.disabled, false);
-  assert.equal(page.data.carePage.focus.action.label, "发送用药提醒");
+  assert.equal(page.data.carePage.focus.action.label, "提醒张三");
 });
 
 test("the dashboard retry action reloads a failed first snapshot", async () => {
@@ -460,10 +484,10 @@ test("the dashboard creates refill work only from an explicit DEPLETED fact", as
 
   await page.load();
 
-  assert.equal(page.data.todoItems.some(item => item.id === "depleted-3"), false);
-  const depletedItem = page.data.todoItems.find(item => item.id === "depleted-4");
+  assert.equal(page.data.todoItems.some(item => item.id === "depleted-legacy-slot-3"), false);
+  const depletedItem = page.data.todoItems.find(item => item.id === "depleted-legacy-slot-4");
   assert.ok(depletedItem);
-  assert.equal(page.data.todoItems.some(item => item.id === "depleted-5"), false);
+  assert.equal(page.data.todoItems.some(item => item.id === "depleted-legacy-slot-5"), false);
   assert.equal(depletedItem.action, "medicine");
   assert.equal(depletedItem.actionLabel, "补药");
 });
@@ -485,11 +509,14 @@ test("the dashboard makes UNKNOWN inventory visible without creating a refill to
 
   assert.equal(page.data.inventoryUnknownCount, 1);
   assert.equal(page.data.depletedCount, 0);
-  assert.equal(page.data.todoItems.some(item => item.id === "depleted-5"), false);
-  const medicineFact = page.data.carePage.overview.find(item => item.key === "home-fact-medicine-risk");
-  assert.equal(medicineFact.value, "1 待确认");
-  assert.equal(medicineFact.state.kind, "pending");
-  assert.deepEqual(medicineFact.action.payload, { filter: "all" });
+  assert.equal(page.data.todoItems.some(item => item.id === "depleted-legacy-slot-5"), false);
+  assert.equal(page.data.carePage.overview.length, 0);
+  const attention = page.data.carePage.sections.find(item => item.key === "home-attention");
+  const medicineItem = attention.items.find(item => item.key === "home-attention-medicine");
+  assert.equal(medicineItem.title, "1 项药品需要维护");
+  assert.match(medicineItem.supporting, /余量待确认 1/);
+  assert.equal(medicineItem.state.kind, "pending");
+  assert.deepEqual(medicineItem.action.payload, { filter: "all" });
 });
 
 test("a confirmed empty slot overrides an old expiry instead of creating two todos", async () => {
@@ -522,7 +549,7 @@ test("a confirmed empty slot overrides an old expiry instead of creating two tod
   await page.load();
 
   assert.deepEqual(Array.from(expiryInput), []);
-  assert.deepEqual(Array.from(page.data.todoItems, item => item.id), ["depleted-1"]);
+  assert.deepEqual(Array.from(page.data.todoItems, item => item.id), ["depleted-legacy-slot-1"]);
   assert.equal(page.data.expiredCount, 0);
   assert.equal(page.data.depletedCount, 1);
 });
@@ -543,7 +570,7 @@ test("an expired medicine is promoted ahead of a routine reminder", async () => 
 
   await page.load();
 
-  assert.equal(page.data.todoItems[0].id, "expiry-4");
+  assert.equal(page.data.todoItems[0].id, "expiry-legacy-slot-4");
 });
 
 test("the hero follows the highest care todo instead of an otherwise normal expiry summary", async () => {
@@ -578,12 +605,12 @@ test("an urgent highest todo gives the hero an urgent visual state", async () =>
 
   await page.load();
 
-  assert.equal(page.data.todoItems[0].id, "expiry-4");
+  assert.equal(page.data.todoItems[0].id, "expiry-legacy-slot-4");
   assert.equal(page.data.heroLevel, "danger");
   assert.equal(page.data.heroBadge, "优先处理");
 });
 
-test("the home care screen promotes the highest todo and keeps four care facts in its overview", async () => {
+test("the home care screen leads with today's plan and moves medicine maintenance into attention", async () => {
   const navigations = [];
   const page = loadHomePage({
     plans: [{ id: "routine", time: "09:00", medicine: "常规用药", status: "pending", due_today: true }],
@@ -601,25 +628,20 @@ test("the home care screen promotes the highest todo and keeps four care facts i
   assert.equal(page.data.carePage.phase.kind, "loading");
   await page.load();
 
-  assert.equal(page.data.carePage.focus.title, "过期药 已过期");
-  assert.equal(page.data.carePage.focus.activation, "surface");
-  assert.equal(page.data.carePage.focus.action.id, "home.focus.medicine");
-  assert.equal(page.data.carePage.focus.action.payload.slot, 4);
-  assert.deepEqual(Array.from(page.data.carePage.overview, fact => fact.label), ["今日计划", "未读拦截", "药品风险", "药箱"]);
-  assert.equal(page.data.carePage.overview[2].action.id, "home.cabinet.expired");
-  assert.deepEqual(Array.from(page.data.carePage.sections, section => section.intent), ["tasks", "navigation"]);
+  assert.equal(page.data.carePage.focus.title, "09:00 · 老人");
+  assert.equal(page.data.carePage.focus.activation, "button");
+  assert.equal(page.data.carePage.focus.action.id, "home.focus.remind");
+  assert.equal(page.data.carePage.focus.progress.current, 0);
+  assert.equal(page.data.carePage.focus.progress.total, 1);
+  assert.equal(page.data.carePage.overview.length, 0);
+  assert.deepEqual(Array.from(page.data.carePage.sections, section => section.intent), ["tasks", "timeline", "navigation"]);
 
-  const todaySection = page.data.carePage.sections.find(section => section.key === "home-today-care");
-  assert.equal(todaySection.more.id, "home.today");
-  page.onCarePageAction({ detail: todaySection.more });
-  assert.equal(page.data.detailVisible, true);
-  assert.equal(page.data.detailMode, "todo");
-
-  page.onCarePageAction({ detail: page.data.carePage.focus.action });
-  page.onCarePageAction({ detail: page.data.carePage.overview[2].action });
+  const attention = page.data.carePage.sections.find(section => section.key === "home-attention");
+  const medicineItem = attention.items.find(item => item.key === "home-attention-medicine");
+  assert.equal(medicineItem.action.id, "home.cabinet.expired");
+  page.onCarePageAction({ detail: medicineItem.action });
   assert.deepEqual(Array.from(navigations, item => item.url), [
-    "/pages/addMedicine/index?slot=4",
-    "/pages/medicineList/index?filter=expired",
+    "/pages/libraryList/index?filter=expired",
   ]);
 });
 
@@ -673,9 +695,8 @@ test("an older cloud keeps the dashboard ready and labels safety history unsuppo
   assert.equal(page.data.carePage.phase.kind, "ready");
   assert.equal(page.data.safetyState.availability, "unsupported");
   assert.equal(safetyListCalls, 0);
-  const safetyFact = page.data.carePage.overview.find(fact => fact.key === "home-fact-safety");
-  assert.equal(safetyFact.value, "未支持");
-  assert.equal(safetyFact.action, null);
+  assert.equal(page.data.carePage.overview.length, 0);
+  assert.equal(page.data.carePage.sections.some(section => section.key === "home-attention"), false);
 });
 
 test("the dashboard exposes a safety membership denial without collapsing the whole page", async () => {
@@ -699,12 +720,11 @@ test("the dashboard exposes a safety membership denial without collapsing the wh
   await page.load();
   assert.equal(page.data.carePage.phase.kind, "ready");
   assert.equal(page.data.safetyState.availability, "forbidden");
-  const safetyFact = page.data.carePage.overview.find(fact => fact.key === "home-fact-safety");
-  assert.equal(safetyFact.value, "无权限");
-  assert.equal(safetyFact.action, null);
+  assert.equal(page.data.carePage.overview.length, 0);
+  assert.equal(page.data.carePage.sections.some(section => section.key === "home-attention"), false);
 });
 
-test("a transient safety refresh failure keeps the last unread focus and marks it stale", async () => {
+test("a transient safety refresh failure keeps the last unread attention and marks the page stale", async () => {
   let safetyReads = 0;
   const page = loadHomePage(
     { plans: [], inquiries: [] },
@@ -741,18 +761,19 @@ test("a transient safety refresh failure keeps the last unread focus and marks i
 
   assert.equal(page.data.safetyState.availability, "error");
   assert.equal(page.data.stale, true);
-  assert.equal(page.data.carePage.focus.action.id, "home.focus.safety");
-  assert.equal(page.data.carePage.focus.action.payload.eventId, "safety-stale-home");
   assert.match(page.data.carePage.focus.supporting, /可能不是最新/);
-  assert.equal(page.data.carePage.overview[1].value, "待确认");
+  const attention = page.data.carePage.sections.find(section => section.key === "home-attention");
+  const safetyItem = attention.items.find(item => item.key === "home-attention-safety");
+  assert.equal(safetyItem.action.id, "home.risks");
+  assert.match(safetyItem.title, /1 条用药风险/);
 });
 
-test("an unread safety block outranks an offline box and opens its record from the whole focus card", async () => {
+test("an unread safety block stays visible as attention while connection remains in the header flow", async () => {
   const tabRoutes = [];
   const page = loadHomePage(
     { plans: [], inquiries: [] },
     [],
-    { switchTab: request => tabRoutes.push(request.url) },
+    { navigateTo: request => tabRoutes.push(request.url) },
     [],
     {
       attention: [{ slot: 4, name: "过期药", expiryText: "已过期", expiryHint: "请处理", expiryClass: "expired" }],
@@ -789,21 +810,16 @@ test("an unread safety block outranks an offline box and opens its record from t
 
   await page.load();
 
-  assert.equal(page.data.carePage.focus.action.id, "home.focus.safety");
+  assert.equal(page.data.carePage.focus.action.id, "home.focus.connection");
   assert.equal(page.data.carePage.focus.activation, "surface");
-  assert.equal(page.data.carePage.focus.action.payload.eventId, "safety-wang-focus");
-  assert.match(page.data.carePage.focus.title, /王奶奶/);
-  assert.match(page.data.carePage.focus.supporting, /布洛芬缓释胶囊/);
-  assert.match(page.data.carePage.focus.supporting, /药箱未出药/);
-  assert.equal(page.data.carePage.overview.length, 4);
-  const safetyFact = page.data.carePage.overview.find(fact => fact.label === "未读拦截");
-  assert.equal(safetyFact.value, "至少 1");
+  assert.equal(page.data.carePage.overview.length, 0);
+  const attention = page.data.carePage.sections.find(section => section.key === "home-attention");
+  const safetyItem = attention.items.find(item => item.key === "home-attention-safety");
+  assert.match(safetyItem.title, /1 条用药风险/);
+  assert.equal(safetyItem.action.id, "home.risks");
 
-  page.onCarePageAction({ detail: page.data.carePage.focus.action });
-  assert.equal(page._testApp.globalData.pendingCareRecord.type, "safety");
-  assert.equal(page._testApp.globalData.pendingCareRecord.eventId, "safety-wang-focus");
-  assert.equal(page._testApp.globalData.pendingCareRecord.deviceId, "box-1");
-  assert.deepEqual(tabRoutes, ["/pages/records/index"]);
+  page.onCarePageAction({ detail: safetyItem.action });
+  assert.deepEqual(tabRoutes, ["/pages/medicationRisks/index"]);
 });
 
 test("the dashboard delegates its focus and overview to the shared care screen", () => {
@@ -823,7 +839,7 @@ test("the dashboard keeps full todo and timeline lists behind secondary sheets",
   assert.match(layout, /class="ui-sheet"/);
 });
 
-test("the dashboard gives the next medication a clear compact label without duplicating the todo entry", async () => {
+test("the dashboard puts the next medication and daily progress in the focus card without duplication", async () => {
   const page = loadHomePage({
     plans: [{
       id: "next-dose",
@@ -840,11 +856,19 @@ test("the dashboard gives the next medication a clear compact label without dupl
   await page.load();
 
   assert.equal(page.data.nextDoseText, "08:30 · 妈妈 · 降压药 · 1片");
-  const tasks = page.data.carePage.sections.find(section => section.intent === "tasks");
-  const dose = tasks.items.find(item => item.key === "home-next-dose");
-  assert.equal(dose.supporting, page.data.nextDoseText);
-  assert.equal(dose.action.id, "home.remind.next-dose");
-  assert.equal(tasks.items.filter(item => item.title === "下一次用药").length, 1);
+  assert.equal(page.data.carePage.focus.title, "08:30 · 妈妈");
+  assert.equal(page.data.carePage.focus.supporting, "降压药 · 1片");
+  assert.equal(page.data.carePage.focus.action.id, "home.focus.remind");
+  assert.equal(page.data.carePage.focus.action.label, "提醒妈妈");
+  assert.deepEqual(page.data.carePage.focus.progress, {
+    current: 0,
+    total: 1,
+    label: "今日已完成",
+    percent: 0,
+    ariaLabel: "今日已完成 0/1",
+  });
+  assert.equal(page.data.carePage.sections.flatMap(section => section.items)
+    .some(item => item.key === "home-next-dose"), false);
 });
 
 test("the dashboard uses its remaining first-screen space for direct inquiry and family actions", async () => {
@@ -886,7 +910,8 @@ test("the dashboard keeps one dominant task and labels visible inquiry activity 
   assert.match(inquiry.title, /问询/);
   assert.doesNotMatch(inquiry.title, /问诊/);
   assert.equal(page.data.carePage.focus.action, null);
-  assert.equal(page.data.carePage.overview.length, 4);
+  assert.equal(page.data.carePage.overview.length, 0);
+  assert.equal(page.data.carePage.sections.some(section => section.key === "home-attention"), false);
 });
 
 test("the dashboard omits archived persona inquiries from its timeline and count", async () => {
@@ -1282,17 +1307,6 @@ test("a complete persona-v1 snapshot hides orphaned home facts while keeping unl
     { online: true },
     {
       app,
-      getRecentRecordsStrict: async () => [{
-        id: "orphan-record",
-        person_id: "removed-member",
-        persona_generation: "v1",
-        title: "孤儿记录",
-        created_at: "2026-08-10 09:50:00",
-      }, {
-        id: "device-record",
-        title: "药箱自检完成",
-        created_at: "2026-08-10 10:00:00",
-      }],
       getCapabilitiesStrict: async () => ({
         capabilities: {
           explicitInventoryState: "v1",
@@ -1331,9 +1345,9 @@ test("a complete persona-v1 snapshot hides orphaned home facts while keeping unl
   const timelineText = JSON.stringify(page.data.timeline);
   assert.doesNotMatch(timelineText, /orphan|孤儿/);
   assert.match(timelineText, /guest-inquiry/);
-  assert.match(timelineText, /device-record/);
   assert.match(timelineText, /device-vitals/);
   assert.match(timelineText, /device-safety/);
+  assert.doesNotMatch(timelineText, /"source":"record"/);
   assert.notEqual(page.data.carePage.focus.action && page.data.carePage.focus.action.id, "home.focus.safety");
 });
 
@@ -1414,8 +1428,9 @@ test("an incomplete persona snapshot keeps legacy home visibility instead of ena
 
   assert.deepEqual(Array.from(page.data.planItems, item => item.id), ["plan-legacy-orphan-plan"]);
   assert.equal(page.data.inquiryCount, 1);
-  assert.equal(page.data.carePage.focus.action.id, "home.focus.safety");
-  assert.equal(page.data.carePage.focus.action.payload.eventId, "legacy-archived-safety");
+  assert.equal(page.data.carePage.focus.action.id, "home.focus.remind");
+  const attention = page.data.carePage.sections.find(section => section.key === "home-attention");
+  assert.equal(attention.items.find(item => item.key === "home-attention-safety").action.id, "home.risks");
 });
 
 test("home uses the canonical vitals attribution labels instead of inventing a family member", async () => {

@@ -1,9 +1,15 @@
 const api = require("../../utils/api");
 const realtime = require("../../utils/realtime");
 const { summarizeExpiry } = require("../../utils/expiry");
-const { isDoneStatus, isPlanActionable, planTimeValue } = require("../../utils/carePlan");
+const {
+  isDoneStatus,
+  isSkippedStatus,
+  isPlanDueToday,
+  isPlanActionable,
+  planTimeValue,
+} = require("../../utils/carePlan");
 const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
-const cabinetView = require("../../utils/cabinetView");
+const medicineLibrary = require("../../utils/medicineLibrary");
 const deviceSession = require("../../utils/deviceSession");
 const medicationSafetyEvents = require("../../modules/medicationSafetyEvents");
 const personaVisibility = require("../../modules/personaVisibility");
@@ -121,21 +127,6 @@ function sortValue(item) {
   return Number.isFinite(time) ? time : 0;
 }
 
-function recordToTimeline(record = {}) {
-  const title = homeDisplayText(record.title || record.message || record.medicine_name, "用药记录");
-  const desc = homeDisplayText(record.description || record.detail || record.result || record.action, "");
-  const rawTime = record.createdAt || record.created_at || record.time || "";
-  return {
-    id: `record-${record._id || record.id || rawTime || title}`,
-    title,
-    desc,
-    time: timelineTime(rawTime),
-    rawTime,
-    level: record.status === "failed" || record.result === "failed" ? "bad" : "ok",
-    source: "record",
-  };
-}
-
 function vitalsToTimeline(record = {}, attributionContext = {}) {
   const vitals = api.normalizeVitals(record) || record;
   const rawTime = vitals.createdAt || vitals.created_at || vitals.time || vitals.deviceTime || vitals.device_time || "";
@@ -228,10 +219,9 @@ function safetyToTimeline(event = {}) {
   };
 }
 
-function buildTimeline(records, inquiries, commands, vitals, safetyEvents, attributionContext = {}) {
+function buildTimeline(inquiries, commands, vitals, safetyEvents, attributionContext = {}) {
   const seen = new Set();
   return []
-    .concat((records || []).map(recordToTimeline))
     .concat((safetyEvents || []).map(safetyToTimeline))
     .concat((vitals || []).map(record => vitalsToTimeline(record, attributionContext)))
     .concat((inquiries || []).map(inquiryToTimeline))
@@ -255,11 +245,13 @@ function medicineRiskItems(medicines) {
 
 function depletedMedicineItems(medicines = []) {
   return (medicines || []).filter(item => item.name && item.isDepleted).map(item => {
+    const box = medicineLibrary.storageBoxFor(item);
     return {
-      slot: item.slot,
+      medicineId: medicineLibrary.medicineIdentity(item),
+      storageBox: item.storageBox || box.id,
       name: item.name,
       title: `${item.name} 已确认无药`,
-      desc: `${item.slot}号仓 · 已在药箱取药后确认用完，补入后请更新药品资料`,
+      desc: `${item.storageBoxLabel || box.label} · 最近一次现场确认已经用完`,
     };
   });
 }
@@ -310,174 +302,165 @@ function homeCarePage(state = {}) {
   const planItems = state.planItems || [];
   const reminder = planItems[0] || null;
   const reminderKey = reminder && reminder.planKey ? reminder.planKey : "";
-  const focusTodo = (state.todoItems || [])[0] || null;
-  const focusState = state.heroLevel === "danger"
-    ? "risk"
-    : (state.heroLevel === "valid" ? "normal" : "pending");
+  const reminderPlan = state.reminderPlan || {};
+  const todayPlanTotal = Number(state.todayPlanTotal || 0);
+  const todayPlanCompleted = Number(state.todayPlanCompleted || 0);
+  const reminderPerson = planUserName(reminderPlan);
+  const reminderMedicine = reminderPlan.medicine
+    || reminderPlan.medicine_name
+    || reminderPlan.name
+    || "计划用药";
+  const reminderDose = reminderPlan.dose || reminderPlan.dosage || "";
+  const reminderTime = String(reminderPlan.time || "--:--").slice(0, 5);
+  const deviceOnline = Boolean(state.device && state.device.online);
+
+  let focusTitle = "今天暂无用药计划";
+  let focusSupporting = "有新的计划或照护记录时会自动更新。";
+  let focusState = { kind: "normal", label: "无需提醒" };
   let focusAction = null;
   let focusActivation = "none";
-  if (focusTodo && focusTodo.action === "safety" && focusTodo.eventId) {
-    focusAction = {
-      id: "home.focus.safety",
-      label: "查看安全核查记录",
-      payload: { eventId: focusTodo.eventId },
-    };
-    focusActivation = "surface";
-  } else if (focusTodo && focusTodo.action === "medicine" && focusTodo.slot) {
-    focusAction = {
-      id: "home.focus.medicine",
-      label: `打开 ${focusTodo.slot} 号仓维护`,
-      payload: { slot: focusTodo.slot },
-    };
-    focusActivation = "surface";
-  } else if (focusTodo && focusTodo.action === "remind" && focusTodo.planKey) {
+  if (reminder && reminderKey) {
+    focusTitle = `${reminderTime} · ${reminderPerson}`;
+    focusSupporting = [reminderMedicine, reminderDose].filter(Boolean).join(" · ");
+    focusState = { kind: "pending", label: "待提醒" };
     focusAction = {
       id: "home.focus.remind",
-      label: state.reminderSubmitting ? "发送中…" : "发送用药提醒",
-      payload: { planKey: focusTodo.planKey },
+      label: state.reminderSubmitting ? "发送中…" : `提醒${reminderPerson}`,
+      payload: { planKey: reminderKey },
       disabled: Boolean(state.reminderSubmitting),
     };
     focusActivation = "button";
-  } else if (!(state.device && state.device.online)) {
+  } else if (todayPlanTotal > 0) {
+    focusTitle = "今天的用药计划已完成";
+    focusSupporting = `${todayPlanTotal} 次计划均已确认。`;
+    focusState = { kind: "normal", label: "已完成" };
+  } else if (!deviceOnline) {
+    focusTitle = "照护信息等待更新";
+    focusSupporting = "家庭药箱重新连接后，今日计划会自动同步。";
+    focusState = { kind: "pending", label: "待连接" };
     focusAction = { id: "home.focus.connection", label: "打开药箱连接设置" };
     focusActivation = "surface";
   }
 
+  if (state.stale) {
+    focusSupporting = ["刷新失败，当前照护信息可能不是最新。", focusSupporting]
+      .filter(Boolean)
+      .join(" ");
+  }
+
+  const attentionItems = [];
+  if (Number(state.unreadRiskCount || 0) > 0) {
+    attentionItems.push({
+      key: "home-attention-safety",
+      symbol: "safety",
+      title: `${state.unreadRiskCount} 条用药风险待查看`,
+      supporting: "查看涉及的家人、药品和风险依据",
+      state: { kind: "risk", label: "需确认" },
+      action: { id: "home.risks", label: "查看用药风险" },
+    });
+  }
+
+  const medicineAttentionCount = Number(state.expiryRiskCount || 0)
+    + Number(state.depletedCount || 0)
+    + Number(state.inventoryUnknownCount || 0);
+  if (medicineAttentionCount > 0) {
+    const medicineAttentionCopy = [
+      state.expiredCount ? `过期 ${state.expiredCount}` : "",
+      state.expiringCount ? `临期 ${state.expiringCount}` : "",
+      state.missingExpiryCount ? `有效期待补 ${state.missingExpiryCount}` : "",
+      state.depletedCount ? `无药 ${state.depletedCount}` : "",
+      state.inventoryUnknownCount ? `余量待确认 ${state.inventoryUnknownCount}` : "",
+    ].filter(Boolean).join(" · ");
+    attentionItems.push({
+      key: "home-attention-medicine",
+      symbol: "inventory",
+      title: `${medicineAttentionCount} 项药品需要维护`,
+      supporting: medicineAttentionCopy,
+      state: {
+        kind: state.expiredCount ? "risk" : "pending",
+        label: state.expiredCount ? "优先处理" : "待处理",
+      },
+      action: {
+        id: `home.cabinet.${state.primaryMedicineFilter || "all"}`,
+        label: "查看需维护药品",
+        payload: { filter: state.primaryMedicineFilter || "all" },
+      },
+    });
+  }
+
+  const sections = [];
+  if (attentionItems.length) {
+    sections.push({
+      key: "home-attention",
+      intent: "tasks",
+      title: "需要关注",
+      items: attentionItems,
+    });
+  }
+  sections.push({
+    key: "home-care-activity",
+    intent: "timeline",
+    title: "照护动态",
+    items: [
+      {
+        key: "home-health-measurement",
+        symbol: "measure",
+        title: "健康测量",
+        supporting: state.latestVitalsText,
+        state: { kind: "actionable", label: "查看" },
+        action: { id: "home.vitals", label: "查看健康测量" },
+      },
+      {
+        key: "home-recent-activity",
+        symbol: "timeline",
+        title: "近期记录",
+        supporting: state.latestCount ? `最近同步 ${state.latestCount} 条照护记录` : "还没有照护记录",
+        state: { kind: "muted", label: state.latestCount ? `${state.latestCount} 条` : "暂无" },
+        action: { id: "home.timeline", label: "查看近期记录" },
+      },
+    ],
+  });
+  sections.push({
+    key: "home-navigation",
+    intent: "navigation",
+    title: "家庭服务",
+    items: [
+      {
+        key: "home-inquiry-navigation",
+        symbol: "conversation",
+        title: "问询摘要",
+        supporting: state.inquiryCount ? `${state.inquiryCount} 条问询结论可查看` : "查看家人的健康问询结论",
+        state: { kind: "actionable", label: "查看" },
+        action: { id: "home.inquiry", label: "打开家庭问询" },
+      },
+      {
+        key: "home-family-navigation",
+        symbol: "person",
+        title: "家人资料",
+        supporting: "查看家庭成员与照护设置",
+        state: { kind: "normal", label: "管理" },
+        action: { id: "home.family", label: "查看家人资料" },
+      },
+    ],
+  });
+
   return composeCarePage({
     key: "home-care",
     title: "家庭照护",
-    online: Boolean(state.device && state.device.online),
+    online: deviceOnline,
     focus: {
-      eyebrow: "今天需要处理",
-      title: state.focusTitle,
-      supporting: state.stale
-        ? (String(state.focusSub || "").indexOf("可能不是最新") >= 0
-          ? `刷新失败。${state.focusSub}`
-          : ["刷新失败，当前照护信息可能不是最新。", state.focusSub].filter(Boolean).join(" "))
-        : state.focusSub,
-      state: { kind: focusState, label: state.heroBadge },
+      eyebrow: "今日照护进度",
+      title: focusTitle,
+      supporting: focusSupporting,
+      progress: todayPlanTotal
+        ? { current: todayPlanCompleted, total: todayPlanTotal, label: "今日已完成" }
+        : null,
+      state: focusState,
       action: focusAction,
       activation: focusActivation,
     },
-    overview: [
-      {
-        key: "home-fact-plan",
-        label: "今日计划",
-        value: (state.planItems || []).length,
-        state: (state.planItems || []).length ? "pending" : "muted",
-      },
-      {
-        key: "home-fact-safety",
-        label: "未读拦截",
-        value: state.safetyState && state.safetyState.availability === "ready"
-          ? (state.safetyState.nextCursor
-            ? `至少 ${state.todaySafetyCount || 0}`
-            : (state.todaySafetyCount || 0))
-          : (state.safetyState && state.safetyState.availability === "unsupported"
-            ? "未支持"
-            : (state.safetyState && state.safetyState.availability === "forbidden" ? "无权限" : "待确认")),
-        state: state.todaySafetyCount
-          ? "risk"
-          : (state.safetyState && ["unknown", "error", "forbidden"].includes(state.safetyState.availability) ? "pending" : "muted"),
-        action: state.todaySafetyCount
-          ? { id: "home.safety.records", label: "查看安全核查记录", payload: { filter: "safety" } }
-          : null,
-      },
-      {
-        key: "home-fact-medicine-risk",
-        label: "药品风险",
-        value: (Number(state.expiryRiskCount || 0) + Number(state.depletedCount || 0))
-          || (state.inventoryUnknownCount ? `${state.inventoryUnknownCount} 待确认` : 0),
-        state: state.expiredCount
-          ? "risk"
-          : ((state.expiryRiskCount || state.depletedCount || state.inventoryUnknownCount) ? "pending" : "muted"),
-        action: (state.expiryRiskCount || state.depletedCount || state.inventoryUnknownCount)
-          ? {
-            id: `home.cabinet.${state.primaryMedicineFilter || "all"}`,
-            label: state.inventoryUnknownCount && !(state.expiryRiskCount || state.depletedCount)
-              ? "查看库存待确认药品"
-              : "查看需处理药品",
-            payload: { filter: state.primaryMedicineFilter || "all" },
-          }
-          : null,
-      },
-      {
-        key: "home-fact-device",
-        label: "药箱",
-        value: state.device && state.device.online ? "在线" : "待连接",
-        state: state.device && state.device.online ? "normal" : "pending",
-      },
-    ],
-    sections: [
-      {
-        key: "home-today-care",
-        intent: "tasks",
-        title: "今日照护",
-        more: (state.todoItems || []).length > 1
-          ? { id: "home.today", label: `全部 ${state.todoItems.length} 项` }
-          : null,
-        items: [
-          {
-            key: "home-next-dose",
-            symbol: "medicine",
-            title: "下一次用药",
-            supporting: state.nextDoseText,
-            state: planItems.length
-              ? { kind: "pending", label: "待提醒" }
-              : { kind: "normal", label: "已完成" },
-            action: reminderKey
-              ? {
-                id: `home.remind.${reminderKey}`,
-                label: state.reminderSubmitting ? "发送中…" : "发送提醒",
-                payload: { planKey: reminderKey },
-                disabled: Boolean(state.reminderSubmitting),
-              }
-              : null,
-          },
-          {
-            key: "home-health-measurement",
-            symbol: "measure",
-            title: "健康测量",
-            supporting: state.latestVitalsText,
-            state: { kind: "actionable", label: "查看" },
-            action: { id: "home.vitals", label: "查看健康测量" },
-          },
-          {
-            key: "home-recent-activity",
-            symbol: "timeline",
-            title: "近期动态",
-            supporting: state.latestCount ? `最近 ${state.latestCount} 条照护动态` : "还没有照护动态",
-            state: { kind: "muted", label: state.latestCount ? `${state.latestCount} 条` : "暂无" },
-            action: { id: "home.timeline", label: "查看近期动态" },
-          },
-        ],
-      },
-      {
-        key: "home-navigation",
-        intent: "navigation",
-        title: "更多照护",
-        items: [
-          {
-            key: "home-inquiry-navigation",
-            symbol: "conversation",
-            title: "问询摘要",
-            supporting: state.inquiryCount ? `${state.inquiryCount} 条已完成` : "查看家人的健康结论",
-            state: { kind: "actionable", label: "问询" },
-            action: { id: "home.inquiry", label: "打开家庭问询" },
-          },
-          {
-            key: "home-family-navigation",
-            symbol: "person",
-            title: "家人和药箱",
-            supporting: state.device && state.device.online ? "药箱在线，可查看家人照护" : "查看家人资料和药箱连接状态",
-            state: state.device && state.device.online
-              ? { kind: "normal", label: "药箱在线" }
-              : { kind: "pending", label: "待连接" },
-            action: { id: "home.family", label: "查看家人和药箱" },
-          },
-        ],
-      },
-    ],
+    overview: [],
+    sections,
   });
 }
 
@@ -553,10 +536,13 @@ Page({
     latestCount: 0,
     inquiryCount: 0,
     focusTitle: "今天暂无需要处理",
-    focusSub: "取药、问询和药品变化会自动同步。",
+    focusSub: "问询、测量和药品变化会自动同步。",
     todoItems: [],
     todoPreview: [],
     planItems: [],
+    todayPlanTotal: 0,
+    todayPlanCompleted: 0,
+    todayPlanPendingCount: 0,
     nextDoseText: "今天无需提醒用药",
     todayPlanNote: "今天没有待执行用药",
     timeline: [],
@@ -597,7 +583,7 @@ Page({
   startRealtime() {
     this.stopRealtime();
     this._stopRealtime = realtime.subscribe(() => this.load(), null, {
-      collections: ["devices", "medicines", "records", "vitals", "commands", "today_plans"],
+      collections: ["devices", "medicines", "vitals", "commands", "today_plans"],
       intervalMs: 20000,
       immediate: false,
     });
@@ -640,6 +626,9 @@ Page({
         todoItems: [],
         todoPreview: [],
         planItems: [],
+        todayPlanTotal: 0,
+        todayPlanCompleted: 0,
+        todayPlanPendingCount: 0,
         timeline: [],
         timelinePreview: [],
         reminderPlan: {},
@@ -657,20 +646,13 @@ Page({
       return;
     }
     try {
-      const [device, medicines, records, commands, snapshot, vitals, safetyState, inventoryPolicy] = await Promise.all([
+      const [device, medicines, commands, snapshot, vitals, safetyState] = await Promise.all([
         api.getDeviceStrict(requestDeviceId),
         api.getMedicinesStrict(requestDeviceId),
-        api.getRecentRecordsStrict(20, requestDeviceId),
         api.getRecentCommandsStrict(12, requestDeviceId),
         api.getSnapshotStrict({ inquiryLimit: 12, deviceId: requestDeviceId }),
         api.getRecentVitalsStrict(20, requestDeviceId),
         medicationSafetyEventModule.list({ limit: 10, unreadOnly: true, deviceId: requestDeviceId }),
-        api.getCapabilitiesStrict(requestDeviceId)
-          .then(cabinetView.inventoryPolicyFor)
-          .catch(error => {
-            console.warn("home inventory capability read failed", error);
-            return cabinetView.inventoryPolicyFor();
-          }),
       ]);
       if (loadRequestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
 
@@ -704,12 +686,6 @@ Page({
           ? personaPolicy.allowsPlan(plan)
           : api.shouldShowPlanForServiceUsers(plan, serviceUsers));
       const inquiries = snapshot.inquiries || [];
-      const visibleRecords = personaPolicy.strict
-        ? (records || []).filter(item => personaPolicy.allowsCurrentRecord(
-          currentFactIdentity(item),
-          { allowUnlinked: true },
-        ))
-        : (records || []);
       const visibleCommands = personaPolicy.strict
         ? (commands || []).filter(item => personaPolicy.allowsCurrentRecord(
           currentFactIdentity(item),
@@ -730,8 +706,13 @@ Page({
       const visibleSafetyState = Object.assign({}, effectiveSafetyState, {
         events: visibleSafetyEvents,
       });
-      const pendingPlans = sortedPlans(plans.filter(isPlanActionable));
-      const inventoryMedicines = (medicines || []).map(item => cabinetView.decorateCabinetSlot(item, inventoryPolicy));
+      const todayPlans = sortedPlans(plans.filter(plan => (
+        isPlanDueToday(plan) && !isSkippedStatus(plan.status)
+      )));
+      const pendingPlans = todayPlans.filter(isPlanActionable);
+      const completedPlans = todayPlans.filter(plan => isDoneStatus(plan.status));
+      const medicineSummary = medicineLibrary.summarizeMedicineLibrary(medicines || []);
+      const inventoryMedicines = medicineSummary.medicines;
       const risks = medicineRiskItems(inventoryMedicines.filter(item => !item.isDepleted));
       const depleted = depletedMedicineItems(inventoryMedicines);
       const inventoryUnknownCount = inventoryMedicines.filter(item => item.isInventoryUnknown).length;
@@ -755,21 +736,23 @@ Page({
         });
       });
       risks.attention.forEach(item => {
+        const box = medicineLibrary.storageBoxFor(item);
         todoItems.push({
-          id: `expiry-${item.slot}`,
+          id: `expiry-${medicineLibrary.medicineIdentity(item)}`,
           icon: "期",
           title: `${item.name} ${item.expiryText}`,
-          desc: `${item.slot}号仓 · ${item.expiryHint}`,
+          desc: `${item.storageBoxLabel || box.label} · ${item.expiryHint}`,
           level: item.expiryClass === "expired" ? "bad" : "warn",
           action: "medicine",
           actionLabel: "处理",
           heroBadge: expiryTodoBadge(item.expiryClass),
-          slot: item.slot,
+          filter: "attention",
+          storageBox: item.storageBox || box.id,
         });
       });
       depleted.forEach(item => {
         todoItems.push({
-          id: `depleted-${item.slot}`,
+          id: `depleted-${item.medicineId}`,
           icon: "补",
           title: item.title,
           desc: item.desc,
@@ -777,7 +760,8 @@ Page({
           action: "medicine",
           actionLabel: "补药",
           heroBadge: "待补药",
-          slot: item.slot,
+          filter: "depleted",
+          storageBox: item.storageBox,
         });
       });
 
@@ -788,13 +772,13 @@ Page({
           id: `safety-${event.id}`,
           eventId: event.id,
           icon: "安",
-          title: `${event.personName}的取药已被药箱阻止`,
-          desc: [event.medicineName, event.summary || "检测到已登记信息冲突", "药箱未出药"].filter(Boolean).join(" · "),
+          title: `${event.personName}存在明确用药风险`,
+          desc: [event.medicineName, event.summary || "与已登记健康资料存在冲突"].filter(Boolean).join(" · "),
           level: "bad",
           priority: -100,
           action: "safety",
           actionLabel: "查看",
-          heroBadge: "安全拦截",
+          heroBadge: "用药风险",
         });
       } else if (safetyProjection.focusCheckFailed && device.online === true) {
         const event = safetyProjection.focusCheckFailed;
@@ -802,8 +786,8 @@ Page({
           id: `safety-${event.id}`,
           eventId: event.id,
           icon: "安",
-          title: `${event.personName}的安全核查未完成`,
-          desc: [event.medicineName, event.summary || "人物或药品资料暂不可用", "药箱未出药"].filter(Boolean).join(" · "),
+          title: `${event.personName}的用药风险需要复核`,
+          desc: [event.medicineName, event.summary || "人物或药品资料暂不完整"].filter(Boolean).join(" · "),
           level: "warn",
           priority: -50,
           action: "safety",
@@ -833,7 +817,6 @@ Page({
           : api.shouldShowInquiryForServiceUsers(item, serviceUsers))
         .filter(api.shouldShowCaregiverInquiry);
       const timeline = buildTimeline(
-        visibleRecords,
         visibleInquiries,
         visibleCommands,
         visibleVitals,
@@ -849,7 +832,7 @@ Page({
         heroLevel: heroState.heroLevel,
         todoCount,
         expiryRiskCount: risks.attention.length,
-        stockCount: risks.medicines.length,
+        stockCount: medicineSummary.medicineCount,
         validExpiryCount: risks.validCount,
         expiringCount: risks.expiringCount,
         expiredCount: risks.expiredCount,
@@ -867,6 +850,9 @@ Page({
         todoItems,
         todoPreview: todoItems.slice(0, 2),
         planItems,
+        todayPlanTotal: todayPlans.length,
+        todayPlanCompleted: completedPlans.length,
+        todayPlanPendingCount: pendingPlans.length,
         nextDoseText,
         todayPlanNote: planItems.length
           ? `今日还有 ${planItems.length} 项待执行，提醒由药箱播报`
@@ -879,6 +865,7 @@ Page({
         deviceId: requestDeviceId,
         safetyDeviceId: requestDeviceId,
         todaySafetyCount: safetyProjection.todayBlockedCount,
+        unreadRiskCount: safetyProjection.unreadBlockedCount + safetyProjection.unreadCheckFailedCount,
         stale: transientSafetyFailure,
       };
       nextData.carePage = homeCarePage(nextData);
@@ -990,7 +977,7 @@ Page({
   },
 
   goCabinet() {
-    wx.switchTab({ url: "/pages/cabinet/index" });
+    wx.switchTab({ url: "/pages/library/index" });
   },
 
   showTodoDetails() {
@@ -1024,7 +1011,7 @@ Page({
     } else if (id === "home.today") {
       this.showTodoDetails();
     } else if (id === "home.focus.medicine") {
-      this.goAddMedicine({ currentTarget: { dataset: { slot: payload.slot } } });
+      this.openMedicineList(payload);
     } else if (id === "home.focus.remind") {
       this.sendMedicineReminder((this._reminderPlansByKey || {})[payload.planKey]);
     } else if (id === "home.focus.connection") {
@@ -1032,9 +1019,11 @@ Page({
     } else if (id === "home.focus.safety") {
       this.openSafetyRecord(payload.eventId);
     } else if (id === "home.safety.records") {
-      this.openSafetyRecords();
+      this.openMedicationRisks();
+    } else if (id === "home.risks") {
+      this.openMedicationRisks();
     } else if (id.indexOf("home.cabinet.") === 0) {
-      wx.navigateTo({ url: `/pages/medicineList/index?filter=${payload.filter || "all"}` });
+      this.openMedicineList({ filter: payload.filter || "all" });
     } else if (id.indexOf("home.remind.") === 0) {
       this.sendMedicineReminder((this._reminderPlansByKey || {})[payload.planKey]);
     } else if (id === "home.vitals") {
@@ -1050,13 +1039,14 @@ Page({
 
   handleDetailItem(e) {
     const action = e.currentTarget.dataset.action || "";
-    const slot = e.currentTarget.dataset.slot || "";
+    const box = e.currentTarget.dataset.box || "";
+    const filter = e.currentTarget.dataset.filter || "";
     const reminderKey = e.currentTarget.dataset.planKey || "";
     this.closeDetail();
     if (action === "remind") {
       this.sendMedicineReminder((this._reminderPlansByKey || {})[reminderKey]);
     } else if (action === "medicine") {
-      this.goAddMedicine({ currentTarget: { dataset: { slot } } });
+      this.openMedicineList({ box, filter: filter || "attention" });
     } else if (action === "safety") {
       this.openSafetyRecord(e.currentTarget.dataset.eventId);
     } else {
@@ -1064,9 +1054,11 @@ Page({
     }
   },
 
-  goAddMedicine(e) {
-    const slot = e && e.currentTarget && e.currentTarget.dataset ? e.currentTarget.dataset.slot : "";
-    wx.navigateTo({ url: slot ? `/pages/addMedicine/index?slot=${slot}` : "/pages/addMedicine/index" });
+  openMedicineList(options = {}) {
+    const query = [];
+    if (options.box) query.push(`box=${encodeURIComponent(options.box)}`);
+    if (options.filter) query.push(`filter=${encodeURIComponent(options.filter)}`);
+    wx.navigateTo({ url: `/pages/libraryList/index${query.length ? `?${query.join("&")}` : ""}` });
   },
 
   goRecords() {
@@ -1079,13 +1071,16 @@ Page({
     const deviceId = String(this.data.deviceId || "").trim();
     const activeDeviceId = String((app.globalData && app.globalData.deviceId) || "").trim();
     if (!id || !deviceId || activeDeviceId !== deviceId) return;
-    app.globalData.pendingCareRecord = { type: "safety", eventId: id, deviceId };
-    wx.switchTab({ url: "/pages/records/index" });
+    app.globalData.pendingMedicationRisk = { eventId: id, deviceId };
+    wx.navigateTo({ url: "/pages/medicationRisks/index" });
   },
 
   openSafetyRecords() {
-    getApp().globalData.pendingCareFilter = "safety";
-    wx.switchTab({ url: "/pages/records/index" });
+    this.openMedicationRisks();
+  },
+
+  openMedicationRisks() {
+    wx.navigateTo({ url: "/pages/medicationRisks/index" });
   },
 
   goVitals() {

@@ -22,8 +22,10 @@ device-secrets.json
 .codex-tools/
 .codex-artifacts/
 .runtime-evidence/
+.docx_inspect/
 __pycache__/
 *.py[cod]
+*.zip
 
 # Station is maintained separately
 .station_upgrade_runtime_*/

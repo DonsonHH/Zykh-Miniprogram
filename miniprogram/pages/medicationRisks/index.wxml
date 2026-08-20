@@ -1,0 +1,26 @@
+<view class="page care-page medication-risks-page">
+  <care-screen model="{{carePage}}" bind:action="onCarePageAction" />
+
+  <view wx:if="{{detailVisible}}" class="ui-sheet-mask" bindtap="closeDetail"></view>
+  <view wx:if="{{detailVisible}}" class="ui-sheet" catchtap="noop">
+    <view class="ui-sheet-grip"></view>
+    <view class="ui-sheet-head">
+      <view class="ui-sheet-title">风险详情</view>
+      <view class="ui-sheet-close" bindtap="closeDetail" aria-role="button">关闭</view>
+    </view>
+    <scroll-view scroll-y class="risk-detail-scroll">
+      <view class="risk-detail-hero {{selectedRisk.checkStatus === 'BLOCKED' ? 'is-high' : 'is-review'}}">
+        <view class="risk-detail-kicker">{{selectedRisk.checkStatus === 'BLOCKED' ? '明确风险' : (selectedRisk.checkStatus === 'CHECK_FAILED' ? '需要复核' : '核验记录')}}</view>
+        <view class="risk-detail-title">{{selectedRisk.personName}} · {{selectedRisk.medicineName}}</view>
+        <view class="risk-detail-summary">{{selectedRisk.summary || selectedRisk.outcomeText}}</view>
+      </view>
+      <view class="risk-detail-grid">
+        <view class="risk-detail-item"><text>家庭成员</text><view>{{selectedRisk.personName}}</view></view>
+        <view class="risk-detail-item"><text>涉及药品</text><view>{{selectedRisk.medicineName}}</view></view>
+        <view class="risk-detail-item risk-detail-item--wide"><text>风险依据</text><view>{{selectedRisk.reasonText}}</view></view>
+        <view class="risk-detail-item risk-detail-item--wide"><text>建议处理</text><view>{{selectedRisk.outcomeText}}</view></view>
+        <view class="risk-detail-item risk-detail-item--wide"><text>记录时间</text><view>{{selectedRisk.occurredAt || '时间未记录'}}</view></view>
+      </view>
+    </scroll-view>
+  </view>
+</view>

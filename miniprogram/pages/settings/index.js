@@ -143,12 +143,9 @@ function safetyEventTime(event = {}) {
 }
 
 function safetyOutcomeText(event = {}) {
-  if (event.checkStatus === "BLOCKED") return "已拦截，药箱未出药";
-  if (event.checkStatus === "CHECK_FAILED") return "核查未完成，药箱未出药";
-  if (event.dispenseStatus === "DISPENSED") return "核查通过，已继续现场取药";
-  if (event.dispenseStatus === "HARDWARE_FAILED") return "核查通过，但开柜失败";
-  if (event.dispenseStatus === "RESULT_UNKNOWN") return "核查通过，取药结果待确认";
-  return "安全核查已记录";
+  if (event.checkStatus === "BLOCKED") return "存在明确用药风险";
+  if (event.checkStatus === "CHECK_FAILED") return "风险资料需要复核";
+  return "用药风险核验已记录";
 }
 
 function memberSafetySummary(member = {}, events = []) {

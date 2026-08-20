@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "用药风险",
+  "usingComponents": {
+    "care-screen": "/components/careScreen/index"
+  }
+}

@@ -1,5 +1,5 @@
 const CHECK_STATUSES = ["PASSED", "BLOCKED", "CHECK_FAILED"];
-const DISPENSE_STATUSES = ["NOT_STARTED", "BLOCKED", "DISPENSED", "HARDWARE_FAILED", "RESULT_UNKNOWN"];
+const DISPENSE_STATUSES = ["NOT_APPLICABLE", "NOT_STARTED", "BLOCKED", "DISPENSED", "HARDWARE_FAILED", "RESULT_UNKNOWN"];
 
 function firstPresent(...values) {
   for (let index = 0; index < values.length; index += 1) {
@@ -12,6 +12,21 @@ function firstPresent(...values) {
 function text(value, fallback = "") {
   const normalized = String(value === undefined || value === null ? "" : value).replace(/\s+/g, " ").trim();
   return normalized || fallback;
+}
+
+function caregiverSummary(value) {
+  return text(value)
+    .replace(/(?:本次|系统)?(?:已)?阻止(?:老人|用户)?取药/g, "")
+    .replace(/(?:本次|系统)?(?:未|没有)(?:完成)?出药/g, "")
+    .replace(/(?:药箱)?柜门(?:未|没有)打开/g, "")
+    .replace(/(?:药仓|仓门)(?:未|没有)打开/g, "")
+    .replace(/舵机[^，。；;]*/g, "")
+    .replace(/[，,]\s*(?=[。；;]|$)/g, "")
+    .replace(/[；;]{2,}/g, "；")
+    .replace(/[；;]+(?=。|$)/g, "")
+    .replace(/。{2,}/g, "。")
+    .replace(/^[，,。；;\s]+|[，,；;\s]+$/g, "")
+    .trim();
 }
 
 function uppercase(value) {
@@ -291,7 +306,7 @@ function normalizeMedicationSafetyEvent(raw = {}) {
       payload.reasonCodes,
       payload.reason_codes,
     )),
-    summary: text(firstPresent(
+    summary: caregiverSummary(firstPresent(
       raw.summary,
       raw.caregiverSummary,
       raw.caregiver_summary,
@@ -319,6 +334,58 @@ function normalizeMedicationSafetyEvent(raw = {}) {
   };
 }
 
+function riskRegistryIdentity(event = {}) {
+  const person = text(event.personId) || text(event.personName, "unknown-person");
+  const generation = text(event.personaGeneration, "legacy");
+  const medicine = text(event.medicineId) || text(event.medicineName, "unknown-medicine");
+  return `${person}|${generation}|${medicine}`;
+}
+
+function riskTimeValue(value) {
+  const parsed = Date.parse(text(value).replace(/-/g, "/"));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function projectRiskRegistry(events = []) {
+  const groups = new Map();
+  (events || [])
+    .filter(event => event && ["BLOCKED", "CHECK_FAILED", "PASSED"].includes(event.checkStatus))
+    .forEach(event => {
+      const key = riskRegistryIdentity(event);
+      const existing = groups.get(key);
+      const latest = !existing || riskTimeValue(event.occurredAt) > riskTimeValue(existing.latest.occurredAt)
+        ? event
+        : existing.latest;
+      const reasons = new Set(existing ? existing.reasonCodes : []);
+      (event.reasonCodes || []).forEach(reason => reasons.add(reason));
+      groups.set(key, {
+        key,
+        latest,
+        occurrenceCount: Number(existing && existing.occurrenceCount || 0) + 1,
+        unreadCount: Number(existing && existing.unreadCount || 0) + (event.readState === "UNREAD" ? 1 : 0),
+        reasonCodes: Array.from(reasons),
+      });
+    });
+
+  const grouped = Array.from(groups.values()).map(group => Object.assign({}, group.latest, {
+    registryKey: group.key,
+    eventId: group.latest.id,
+    occurrenceCount: group.occurrenceCount,
+    unreadCount: group.unreadCount,
+    reasonCodes: group.reasonCodes,
+    readState: group.unreadCount ? "UNREAD" : group.latest.readState,
+  })).sort((left, right) => {
+    if (Boolean(left.unreadCount) !== Boolean(right.unreadCount)) return left.unreadCount ? -1 : 1;
+    return riskTimeValue(right.occurredAt) - riskTimeValue(left.occurredAt);
+  });
+  const all = grouped.filter(event => event.checkStatus !== "PASSED");
+  return {
+    all,
+    blocked: all.filter(event => event.checkStatus === "BLOCKED"),
+    review: all.filter(event => event.checkStatus === "CHECK_FAILED"),
+  };
+}
+
 function isCompletedPhysicalDispense(value = {}) {
   const event = value.checkStatus ? value : normalizeMedicationSafetyEvent(value);
   if (event.checkStatus !== "PASSED") return false;
@@ -330,49 +397,25 @@ function eventPresentation(value = {}) {
   const event = value.checkStatus ? value : normalizeMedicationSafetyEvent(value);
   if (event.checkStatus === "BLOCKED") {
     return {
-      title: `${event.personName} · 已阻止取药`,
-      subtitle: `${event.medicineName} · 药箱未出药`,
-      state: { kind: "risk", label: "安全拦截" },
-      outcomeText: "药箱未出药",
+      title: `${event.personName} · 存在明确用药风险`,
+      subtitle: `${event.medicineName} · 不建议自行使用`,
+      state: { kind: "risk", label: "明确风险" },
+      outcomeText: "不建议自行使用，请根据风险依据进一步确认",
     };
   }
   if (event.checkStatus === "CHECK_FAILED") {
     return {
-      title: `${event.personName} · 未能完成安全核查`,
-      subtitle: `${event.medicineName} · 药箱未出药`,
-      state: { kind: "pending", label: "核查未完成" },
-      outcomeText: "药箱未出药",
-    };
-  }
-  if (event.dispenseStatus === "DISPENSED" || isCompletedPhysicalDispense(event)) {
-    return {
-      title: `${event.personName} · 安全核查通过`,
-      subtitle: `${event.medicineName} · 已继续现场取药`,
-      state: { kind: "normal", label: "已完成取药" },
-      outcomeText: "已继续现场取药",
-    };
-  }
-  if (event.dispenseStatus === "HARDWARE_FAILED") {
-    return {
-      title: `${event.personName} · 核查通过但开柜失败`,
-      subtitle: `${event.medicineName} · 未确认取出药品`,
-      state: { kind: "risk", label: "开柜失败" },
-      outcomeText: "未确认取出药品",
-    };
-  }
-  if (event.dispenseStatus === "RESULT_UNKNOWN") {
-    return {
-      title: `${event.personName} · 柜门结果待确认`,
-      subtitle: `${event.medicineName} · 请联系现场确认`,
-      state: { kind: "pending", label: "结果待确认" },
-      outcomeText: "请联系现场确认",
+      title: `${event.personName} · 用药风险需要复核`,
+      subtitle: `${event.medicineName} · 资料不足，暂不能判断`,
+      state: { kind: "pending", label: "需要复核" },
+      outcomeText: "请补全个人或药品资料后重新核验",
     };
   }
   return {
-    title: `${event.personName} · 安全核查通过`,
-    subtitle: `${event.medicineName} · 尚未确认现场取药结果`,
-    state: { kind: "actionable", label: "核查通过" },
-    outcomeText: "尚未确认现场取药结果",
+    title: `${event.personName} · 已完成用药风险核验`,
+    subtitle: `${event.medicineName} · 暂未发现已登记风险`,
+    state: { kind: "normal", label: "已核验" },
+    outcomeText: "暂未发现档案中已登记的风险，实际用药仍应遵循医嘱",
   };
 }
 
@@ -383,7 +426,7 @@ function projectRecords(events = []) {
     .filter(event => !event.identityConflict)
     .map(event => Object.assign({}, event, eventPresentation(event), {
       type: "safety",
-      typeLabel: "安全核查",
+      typeLabel: "用药风险",
       rawTime: event.occurredAt,
       sortTime: Date.parse(String(event.occurredAt || "").replace(/-/g, "/")) || 0,
     }))
@@ -479,7 +522,7 @@ function createMedicationSafetyEventModule(gateway = {}) {
       if (!supportsMedicationSafetyEvents(capabilitySnapshot)) {
         return {
           availability: "unsupported",
-          message: "当前云端版本尚未支持安全记录",
+          message: "当前云端版本尚未支持用药风险记录",
           events: [],
           nextCursor: "",
           capabilitySnapshot,
@@ -498,7 +541,7 @@ function createMedicationSafetyEventModule(gateway = {}) {
         }
         return {
           availability: "ready",
-          message: rows.length ? "" : "暂无安全核查记录",
+          message: rows.length ? "" : "暂无用药风险记录",
           events: rows.map(normalizeMedicationSafetyEvent),
           nextCursor: text(result && (result.nextCursor || result.next_cursor)),
           capabilitySnapshot,
@@ -507,7 +550,7 @@ function createMedicationSafetyEventModule(gateway = {}) {
         if (isForbiddenError(error)) return forbiddenState(error, { capabilitySnapshot });
         return {
           availability: "error",
-          message: "安全记录读取失败，请稍后重试",
+          message: "用药风险记录读取失败，请稍后重试",
           events: [],
           nextCursor: "",
           capabilitySnapshot,
@@ -542,6 +585,7 @@ function createMedicationSafetyEventModule(gateway = {}) {
 
     projectRecords,
     projectHome,
+    projectRiskRegistry,
   };
 }
 
@@ -552,6 +596,7 @@ module.exports = {
   eventPresentation,
   projectRecords,
   projectHome,
+  projectRiskRegistry,
   supportsMedicationSafetyEvents,
   validateMedicationSafetyEventReadReceipt,
   createMedicationSafetyEventModule,

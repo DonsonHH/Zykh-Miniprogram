@@ -187,22 +187,22 @@ test("records waits for the device session and starts one read before non-immedi
   assert.equal(realtimeOptions.immediate, false);
 });
 
-test("care timeline filters one mixed feed without hiding the other record type", () => {
+test("care timeline filters health measurements and medication risks without hiding either type", () => {
   const page = loadRecordsPage();
   page.data = {
     feed: [
-      { id: "dose-1", type: "dose" },
+      { id: "safety-1", type: "safety" },
       { id: "vitals-1", type: "vitals" },
-      { id: "dose-2", type: "dose" },
+      { id: "safety-2", type: "safety" },
     ],
     recordFilter: "all",
   };
   page.setData = next => Object.assign(page.data, next);
 
-  page.applyRecordFilter("dose");
-  assert.equal(page.data.recordFilter, "dose");
-  assert.deepEqual(page.data.visibleFeed.map(item => item.id), ["dose-1", "dose-2"]);
-  assert.equal(page.data.emptyText, "暂无用药记录。");
+  page.applyRecordFilter("safety");
+  assert.equal(page.data.recordFilter, "safety");
+  assert.deepEqual(page.data.visibleFeed.map(item => item.id), ["safety-1", "safety-2"]);
+  assert.equal(page.data.emptyText, "暂无用药风险记录。");
 
   page.setRecordFilter({ currentTarget: { dataset: { filter: "vitals" } } });
   assert.equal(page.data.recordFilter, "vitals");
@@ -214,10 +214,10 @@ test("filtered timeline opens its first visible record from both the focus card 
   page.data = {
     feed: [
       {
-        id: "dose-latest",
-        type: "dose",
-        title: "妈妈 已取药",
-        subtitle: "降压药 · 1片",
+        id: "safety-latest",
+        type: "safety",
+        title: "妈妈 · 存在明确用药风险",
+        subtitle: "降压药 · 建议先咨询医生",
         time: "09:00",
         date: "8月9日",
       },
@@ -231,7 +231,6 @@ test("filtered timeline opens its first visible record from both the focus card 
       },
     ],
     recordFilter: "all",
-    latestText: "妈妈 已取药 · 09:00",
   };
   page.setData = next => Object.assign(page.data, next);
 
@@ -255,15 +254,14 @@ test("an empty filtered timeline presents that filter's empty state without a st
   page.data = {
     feed: [
       {
-        id: "dose-only",
-        type: "dose",
-        title: "妈妈 已取药",
+        id: "safety-only",
+        type: "safety",
+        title: "妈妈 · 存在明确用药风险",
         time: "09:00",
         date: "8月9日",
       },
     ],
     recordFilter: "all",
-    latestText: "妈妈 已取药 · 09:00",
   };
   page.setData = next => Object.assign(page.data, next);
 
@@ -280,13 +278,11 @@ test("an empty filtered timeline presents that filter's empty state without a st
 test("records shows a retryable error instead of an empty timeline when its first read fails", async () => {
   let unavailable = true;
   const page = loadRecordsPage({
-    getRecentRecords: async () => [],
     getRecentVitals: async () => [],
-    getRecentRecordsStrict: async () => {
-      if (unavailable) throw new Error("records unavailable");
+    getRecentVitalsStrict: async () => {
+      if (unavailable) throw new Error("vitals unavailable");
       return [];
     },
-    getRecentVitalsStrict: async () => [],
   });
 
   await page.load();
@@ -307,24 +303,20 @@ test("records shows a retryable error instead of an empty timeline when its firs
 
 test("records keeps the last timeline and marks it as stale when a background refresh fails", async () => {
   let refreshFails = false;
-  const records = [{
-    id: "dispense-kept",
-    type: "DISPENSE",
-    medicine_name: "降压药",
-    quantity: 1,
-    target_user_name: "妈妈",
-    dry_run: false,
-    qsm_ok: true,
+  const vitals = [{
+    recordId: "vitals-kept",
+    personName: "妈妈",
+    bodyTemp: 36.5,
+    spo2: 98,
+    heartRate: 72,
     createdAt: todayAt("09:00"),
   }];
   const page = loadRecordsPage({
-    getRecentRecords: async () => records,
-    getRecentVitals: async () => [],
-    getRecentRecordsStrict: async () => {
+    getRecentVitals: async () => vitals,
+    getRecentVitalsStrict: async () => {
       if (refreshFails) throw new Error("refresh failed");
-      return records;
+      return vitals;
     },
-    getRecentVitalsStrict: async () => [],
   });
 
   await page.load();
@@ -332,7 +324,7 @@ test("records keeps the last timeline and marks it as stale when a background re
   await page.load();
 
   assert.equal(page.data.carePage.phase.kind, "ready");
-  assert.equal(page.data.feed[0].id, "dose-dispense-kept");
+  assert.equal(page.data.feed[0].id, "vitals-vitals-kept");
   assert.match(page.data.carePage.focus.supporting, /可能不是最新/);
 });
 
@@ -340,11 +332,11 @@ test("care records keep four recent rows on the page while the detail sheet keep
   const page = loadRecordsPage();
   page.data = {
     feed: [
-      { id: "latest-dose", type: "dose" },
+      { id: "latest-safety", type: "safety" },
       { id: "latest-vitals", type: "vitals" },
-      { id: "older-dose", type: "dose" },
+      { id: "older-safety", type: "safety" },
       { id: "older-vitals", type: "vitals" },
-      { id: "archive-dose", type: "dose" },
+      { id: "archive-safety", type: "safety" },
     ],
     recordFilter: "all",
   };
@@ -352,14 +344,14 @@ test("care records keep four recent rows on the page while the detail sheet keep
 
   page.applyRecordFilter("all");
 
-  assert.deepEqual(page.data.visibleFeed.map(item => item.id), ["latest-dose", "latest-vitals", "older-dose", "older-vitals", "archive-dose"]);
-  assert.deepEqual(page.data.previewFeed.map(item => item.id), ["latest-dose", "latest-vitals", "older-dose", "older-vitals"]);
+  assert.deepEqual(page.data.visibleFeed.map(item => item.id), ["latest-safety", "latest-vitals", "older-safety", "older-vitals", "archive-safety"]);
+  assert.deepEqual(page.data.previewFeed.map(item => item.id), ["latest-safety", "latest-vitals", "older-safety", "older-vitals"]);
   assert.equal(page.data.carePage.sections[0].items.length, 4);
   assert.equal(page.data.carePage.sections[0].filters[0].active, true);
 
   page.showAllRecords();
   assert.equal(page.data.detailVisible, true);
-  assert.deepEqual(page.data.detailList.map(item => item.id), ["latest-dose", "latest-vitals", "older-dose", "older-vitals", "archive-dose"]);
+  assert.deepEqual(page.data.detailList.map(item => item.id), ["latest-safety", "latest-vitals", "older-safety", "older-vitals", "archive-safety"]);
 });
 
 test("all records can load the next safety page with canonical-id deduplication and stable ordering", async () => {
@@ -429,7 +421,7 @@ test("all records can load the next safety page with canonical-id deduplication 
   await page.load();
   assert.equal(listRequests[0].limit, 50);
   assert.equal(page.data.safetyNextCursor, "cursor-page-2");
-  assert.equal(page.data.carePage.overview[1].value, "至少 2");
+  assert.equal(page.data.carePage.overview[0].value, "至少 2");
 
   page.showAllRecords();
   assert.equal(page.data.safetyPaginationVisible, true);
@@ -447,7 +439,7 @@ test("all records can load the next safety page with canonical-id deduplication 
   assert.deepEqual(Array.from(page.data.detailList, item => item.id), ["safety-a", "safety-b", "safety-c"]);
   assert.equal(page.data.safetyRecords[0].medicineName, "药品 A（补充）");
   assert.equal(page.data.safetyNextCursor, "");
-  assert.equal(page.data.carePage.overview[1].value, "2");
+  assert.equal(page.data.carePage.overview[0].value, "2");
   assert.equal(page.data.safetyPaginationVisible, false);
 });
 
@@ -776,12 +768,11 @@ test("switching medication boxes clears the old feed immediately and a failed fi
   const requestedDeviceIds = [];
   const page = loadRecordsPage({
     getDevice: async deviceId => ({ deviceId }),
-    getRecentRecordsStrict: async (limit, deviceId) => {
+    getRecentVitalsStrict: async (limit, deviceId) => {
       requestedDeviceIds.push(deviceId);
       if (deviceId === "box-b") throw new Error("box B unavailable");
       return [];
     },
-    getRecentVitalsStrict: async () => [],
     getCapabilitiesStrict: async () => ({ capabilities: { medicationSafetyEvents: "v1" } }),
     getMedicationSafetyEventsStrict: async options => ({
       items: [{
@@ -875,114 +866,33 @@ test("records page renders one semantic care screen and keeps detail rows on dem
   assert.match(layout, /class="ui-sheet care-record-sheet"/);
 });
 
-test("care records only call a physically completed dispense 'taken medicine'", async () => {
+test("records never reads or presents legacy dispense rows", async () => {
+  let legacyRecordReads = 0;
   const page = loadRecordsPage({
-    getRecentRecords: async () => [
-      {
-        id: "dispense-real",
+    getRecentRecordsStrict: async () => {
+      legacyRecordReads += 1;
+      return [{
+        id: "legacy-dispense",
         type: "DISPENSE",
-        medicine_name: "降压药",
-        quantity: 1,
-        unit: "片",
-        target_user_name: "妈妈",
-        dry_run: false,
-        qsm_ok: true,
+        medicine_name: "旧版药品",
         createdAt: todayAt("09:00"),
-      },
-      {
-        id: "dispense-dry-run",
-        type: "DISPENSE",
-        medicine_name: "演练药品",
-        quantity: 1,
-        dry_run: true,
-        qsm_ok: true,
-        createdAt: todayAt("09:01"),
-      },
-      {
-        id: "dispense-hardware-failed",
-        type: "DISPENSE",
-        medicine_name: "未实际取出的药品",
-        quantity: 1,
-        dry_run: false,
-        qsm_ok: false,
-        createdAt: todayAt("09:02"),
-      },
-      {
-        id: "dispense-string-failed",
-        type: "DISPENSE",
-        medicine_name: "字符串失败记录",
-        payload: { dryRun: "false", qsmOk: "false" },
-        createdAt: todayAt("09:03"),
-      },
-      {
-        id: "dispense-string-dry-run",
-        type: "DISPENSE",
-        medicine_name: "字符串演练记录",
-        payload: { dryRun: "true", qsmOk: "true" },
-        createdAt: todayAt("09:04"),
-      },
-      {
-        id: "safety-blocked",
-        type: "MEDICATION_SAFETY_CHECK",
-        check_status: "BLOCKED",
-        dispense_status: "BLOCKED",
-        medicine_name: "布洛芬缓释胶囊",
-        createdAt: todayAt("09:05"),
-      },
-      {
-        id: "dispense-missing-qsm",
-        type: "DISPENSE",
-        medicine_name: "缺少硬件结果",
-        dry_run: false,
-        createdAt: todayAt("09:06"),
-      },
-      {
-        id: "dispense-missing-dry-run",
-        type: "DISPENSE",
-        medicine_name: "缺少演练标志",
-        qsm_ok: true,
-        createdAt: todayAt("09:07"),
-      },
-      {
-        id: "dispense-explicit-status",
-        type: "DISPENSE",
-        dispense_status: "DISPENSED",
-        medicine_name: "状态确认药品",
-        createdAt: todayAt("09:08"),
-      },
-      {
-        id: "dispense-conflicting-safety-status",
-        type: "DISPENSE",
-        check_status: "BLOCKED",
-        dispense_status: "DISPENSED",
-        qsm_ok: true,
-        dry_run: false,
-        medicine_name: "冲突安全状态药品",
-        createdAt: todayAt("09:09"),
-      },
-      {
-        id: "dispense-untyped-safety-status",
-        type: "DISPENSE",
-        check_status: "CHECK_FAILED",
-        qsm_ok: true,
-        dry_run: false,
-        medicine_name: "未完成核查药品",
-        createdAt: todayAt("09:10"),
-      },
-    ],
+      }];
+    },
+    getRecentVitalsStrict: async () => [],
   });
 
   await page.load();
 
-  assert.deepEqual(page.data.doseRecords.map(item => item.medicine), ["状态确认药品", "降压药"]);
-  assert.deepEqual(Array.from(page.data.feed.filter(item => item.type === "dose"), item => item.id), [
-    "dose-dispense-explicit-status",
-    "dose-dispense-real",
+  assert.equal(legacyRecordReads, 0);
+  assert.deepEqual(Array.from(page.data.feed), []);
+  assert.deepEqual(Array.from(page.data.carePage.sections[0].filters, filter => filter.label), [
+    "全部",
+    "用药风险",
+    "测量",
   ]);
-  assert.equal(page.data.todayCount, 2, "only a positive physical result counts as today's medication");
 });
 
-test("a complete persona snapshot filters archived and orphan records across the first page and pagination", async () => {
+test("a complete persona snapshot filters archived safety events across the first page and pagination", async () => {
   const page = loadRecordsPage({
     getDevice: async deviceId => ({ deviceId, online: true }),
     getSnapshotStrict: async () => ({
@@ -992,47 +902,6 @@ test("a complete persona snapshot filters archived and orphan records across the
         { id: "archived-person", name: "已归档人物", personaGeneration: "v1", archived: true },
       ],
     }),
-    getRecentRecordsStrict: async () => [{
-      id: "dose-active",
-      type: "DISPENSE",
-      payload: {
-        service_user_id: "active-person",
-        persona_generation: "v2",
-        person_name: "当前人物",
-        medicine_name: "当前药品",
-        qsm_ok: true,
-        dry_run: false,
-      },
-      createdAt: todayAt("10:00"),
-    }, {
-      id: "dose-archived",
-      type: "DISPENSE",
-      payload: {
-        service_user_id: "archived-person",
-        persona_generation: "v1",
-        person_name: "已归档人物",
-        medicine_name: "归档药品",
-        qsm_ok: true,
-        dry_run: false,
-      },
-      createdAt: todayAt("09:00"),
-    }, {
-      id: "dose-orphan",
-      type: "DISPENSE",
-      service_user_id: "unknown-person",
-      persona_generation: "v1",
-      medicine_name: "孤儿药品",
-      qsm_ok: true,
-      dry_run: false,
-      createdAt: todayAt("08:00"),
-    }, {
-      id: "dose-guest",
-      type: "DISPENSE",
-      medicine_name: "访客药品",
-      qsm_ok: true,
-      dry_run: false,
-      createdAt: todayAt("07:00"),
-    }],
     getRecentVitalsStrict: async () => [],
     getCapabilitiesStrict: async () => ({
       capabilities: {
@@ -1075,7 +944,6 @@ test("a complete persona snapshot filters archived and orphan records across the
 
   await page.load();
 
-  assert.deepEqual(Array.from(page.data.doseRecords, record => record.medicine), ["当前药品", "访客药品"]);
   assert.deepEqual(Array.from(page.data.safetyRecords, record => record.id), ["safety-active", "safety-guest"]);
   assert.equal(page._personaPolicy.strict, true);
 
@@ -1085,7 +953,7 @@ test("a complete persona snapshot filters archived and orphan records across the
   assert.equal(page.data.safetyNextCursor, "");
 });
 
-test("records presents medication safety as its own filter and detail instead of a dispense", async () => {
+test("records presents medication safety as its own filter and detail", async () => {
   const page = loadRecordsPage({
     getRecentRecordsStrict: async () => [],
     getRecentVitalsStrict: async () => [],
@@ -1114,27 +982,26 @@ test("records presents medication safety as its own filter and detail instead of
   await page.load();
 
   assert.equal(page.data.feed[0].type, "safety");
-  assert.equal(page.data.feed[0].title, "王奶奶 · 已阻止取药");
-  assert.match(page.data.feed[0].subtitle, /药箱未出药/);
+  assert.equal(page.data.feed[0].title, "王奶奶 · 存在明确用药风险");
+  assert.match(page.data.feed[0].subtitle, /不建议自行使用/);
   assert.equal(page.data.todaySafetyCount, 1);
   assert.deepEqual(Array.from(page.data.carePage.sections[0].filters, filter => filter.label), [
     "全部",
-    "用药",
-    "安全核查",
+    "用药风险",
     "测量",
   ]);
-  assert.equal(page.data.carePage.overview[1].label, "今日拦截");
+  assert.equal(page.data.carePage.overview[0].label, "今日风险");
 
   page.applyRecordFilter("safety");
   const action = page.data.carePage.sections[0].items[0].action;
   page.onCarePageAction({ detail: action });
-  assert.equal(page.data.detailTitle, "安全核查");
-  assert.equal(page.data.detailList[0].outcomeText, "药箱未出药");
+  assert.equal(page.data.detailTitle, "用药风险");
+  assert.match(page.data.detailList[0].outcomeText, /不建议自行使用/);
 
   const layout = fs.readFileSync(path.join(__dirname, "../miniprogram/pages/records/index.wxml"), "utf8");
   assert.match(layout, /item\.type === 'safety'/);
-  assert.match(layout, /核查结果/);
-  assert.match(layout, /是否出药/);
+  assert.match(layout, /风险状态/);
+  assert.doesNotMatch(layout, /是否出药/);
 });
 
 test("an older cloud keeps records usable and says safety history is unsupported without probing it", async () => {
@@ -1171,7 +1038,7 @@ test("an older cloud keeps records usable and says safety history is unsupported
   assert.equal(safetyDetailCalls, 0);
   assert.equal(page._testApp.globalData.pendingCareRecord, undefined);
   assert.match(page.data.carePage.sections[0].supporting, /当前云端版本尚未支持安全记录/);
-  assert.equal(page.data.carePage.overview[1].value, "未支持");
+  assert.equal(page.data.carePage.overview[0].value, "未支持");
 
   page.applyRecordFilter("safety");
   assert.match(page.data.emptyText, /当前云端版本尚未支持安全记录/);
@@ -1193,7 +1060,7 @@ test("records shows a membership denial explicitly instead of treating it as no 
   assert.equal(page.data.carePage.phase.kind, "ready");
   assert.equal(page.data.safetyState.availability, "forbidden");
   assert.match(page.data.carePage.sections[0].supporting, /当前微信账号无权查看该药箱/);
-  assert.equal(page.data.carePage.overview[1].value, "无权限");
+  assert.equal(page.data.carePage.overview[0].value, "无权限");
 });
 
 test("a pending safety route without the current medication-box id is discarded without reading or marking it", async () => {
@@ -1274,7 +1141,7 @@ test("a home safety focus opens the matching records detail once after switching
 
   assert.equal(page.data.recordFilter, "safety");
   assert.equal(page.data.detailVisible, true);
-  assert.equal(page.data.detailTitle, "安全核查");
+  assert.equal(page.data.detailTitle, "用药风险");
   assert.equal(page.data.detailList[0].id, "safety-route-001");
   assert.equal(page._testApp.globalData.pendingCareRecord, undefined);
 
@@ -1361,7 +1228,7 @@ test("a failed pending detail is consumed once and leaves an explicit manual ret
   assert.ok(retrySection, "the failed navigation should remain visible on the records page");
   assert.match(retrySection.supporting, /读取失败|网络/);
   assert.equal(retrySection.items[0].action.id, "records-action-retry-pending-safety");
-  assert.equal(retrySection.items[0].action.label, "重试打开安全核查");
+  assert.equal(retrySection.items[0].action.label, "重试打开用药风险");
 });
 
 test("the pending-detail retry reuses its original device and event then opens and marks the detail", async () => {
@@ -1415,7 +1282,7 @@ test("the pending-detail retry reuses its original device and event then opens a
   assert.equal(detailCalls, 2);
   assert.equal(markReadCalls, 1);
   assert.equal(page.data.detailVisible, true);
-  assert.equal(page.data.detailTitle, "安全核查");
+  assert.equal(page.data.detailTitle, "用药风险");
   assert.equal(page.data.detailList[0].id, "retry-pending-detail");
   assert.equal(page.data.detailList[0].readState, "READ");
   assert.equal(page.data.pendingSafetyDetailRetry, null);

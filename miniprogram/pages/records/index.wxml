@@ -21,24 +21,18 @@
           aria-role="{{detailMode === 'list' ? 'button' : ''}}"
           aria-label="{{detailMode === 'list' ? '查看' + item.title + '详情' : item.title}}"
         >
-          <view class="care-record-sheet__time {{item.type === 'vitals' ? 'is-vitals' : (item.type === 'safety' ? 'is-safety' : '')}}">
+          <view class="care-record-sheet__time {{item.type === 'safety' ? 'is-safety' : 'is-vitals'}}">
             <text>{{item.time || '--:--'}}</text>
             <label>{{item.date}}</label>
           </view>
           <view class="care-record-sheet__copy">
             <view class="care-record-sheet__title">{{item.title}}</view>
-            <view wx:if="{{item.type === 'dose'}}" class="care-record-sheet__meta">
-              <text>时间：{{item.fullTime}}</text>
-              <text wx:if="{{item.medicine}}">药品：{{item.medicine}}</text>
-              <text wx:if="{{item.quantityText}}">数量：{{item.quantityText}}</text>
-              <text wx:if="{{item.slot}}">仓位：{{item.slot}} 号仓</text>
-            </view>
-            <view wx:elif="{{item.type === 'safety'}}" class="care-record-sheet__meta care-record-sheet__meta--safety">
+            <view wx:if="{{item.type === 'safety'}}" class="care-record-sheet__meta care-record-sheet__meta--safety">
               <text>人物：{{item.personName}}</text>
               <text>药品：{{item.medicineName}}</text>
-              <text>核查结果：{{item.checkStatusText}}</text>
-              <text>是否出药：{{item.outcomeText}}</text>
-              <text>原因摘要：{{item.detailSummary}}</text>
+              <text>风险状态：{{item.checkStatusText}}</text>
+              <text>建议处理：{{item.outcomeText}}</text>
+              <text>风险依据：{{item.detailSummary}}</text>
               <text>时间：{{item.fullTime}}</text>
               <text>查看状态：{{item.readText}}</text>
               <text>版本证据：{{item.evidenceText}}</text>

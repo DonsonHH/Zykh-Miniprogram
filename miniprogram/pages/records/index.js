@@ -37,134 +37,6 @@ function formatDateTime(value) {
   };
 }
 
-function isDispenseRecord(record = {}) {
-  const text = [
-    record.type,
-    record.action,
-    record.category,
-    record.title,
-    record.message,
-    record.description,
-  ].join(" ").toLowerCase();
-  const payload = record.payload || {};
-  return Boolean(
-    record.medicine_name ||
-    record.medicineName ||
-    record.medicine ||
-    payload.medicine_name ||
-    payload.medicineName ||
-    payload.medicine ||
-    text.indexOf("dispense") >= 0 ||
-    text.indexOf("take") >= 0 ||
-    text.indexOf("取药") >= 0 ||
-    text.indexOf("服药") >= 0
-  );
-}
-
-function isTrueFlag(value) {
-  if (value === true || value === 1) return true;
-  return ["true", "1", "yes", "是"].includes(String(value || "").trim().toLowerCase());
-}
-
-function isFalseFlag(value) {
-  if (value === false || value === 0) return true;
-  return ["false", "0", "no", "否"].includes(String(value || "").trim().toLowerCase());
-}
-
-function isCompletedPhysicalDispense(record = {}) {
-  const payload = record.payload || {};
-  const checkStatus = String(firstPresent(
-    record.check_status,
-    record.checkStatus,
-    payload.check_status,
-    payload.checkStatus,
-  )).trim().toUpperCase();
-  const dryRun = firstPresent(record.dry_run, record.dryRun, payload.dry_run, payload.dryRun);
-  const qsmOk = firstPresent(record.qsm_ok, record.qsmOk, payload.qsm_ok, payload.qsmOk);
-  const dispenseStatus = String(firstPresent(
-    record.dispense_status,
-    record.dispenseStatus,
-    payload.dispense_status,
-    payload.dispenseStatus,
-  )).trim().toUpperCase();
-  // “照护记录”是已经发生的事实。演练或硬件未执行的记录留在协同日志，
-  // 不能被家属理解成一次真实用药。
-  if (["BLOCKED", "CHECK_FAILED"].includes(checkStatus)) return false;
-  if (dispenseStatus === "DISPENSED") return true;
-  return isTrueFlag(qsmOk) && isFalseFlag(dryRun);
-}
-
-function parseMedicineFromText(record = {}) {
-  const text = String(firstPresent(record.message, record.title, record.description, ""));
-  const takeMatch = text.match(/(?:取走|取了|取药|服用)\s*([^，。；;\s]+)/);
-  return takeMatch ? takeMatch[1] : "";
-}
-
-function normalizeDoseRecord(record = {}) {
-  const payload = record.payload || {};
-  const rawTime = firstPresent(record.createdAt, record.created_at, record.time, record.updatedAt, record.updated_at);
-  const formatted = formatDateTime(rawTime);
-  const person = firstPresent(
-    record.personName,
-    record.person_name,
-    record.target_user_name,
-    record.patient_name,
-    record.user_name,
-    record.taker,
-    record.taken_by,
-    record.actor_name,
-    record.operator,
-    payload.personName,
-    payload.person_name,
-    payload.target_user_name,
-    payload.patient_name,
-    payload.taker,
-    "家庭成员"
-  );
-  const medicine = firstPresent(
-    record.medicineName,
-    record.medicine_name,
-    record.medicine,
-    record.name,
-    payload.medicineName,
-    payload.medicine_name,
-    payload.medicine,
-    parseMedicineFromText(record),
-    "未记录药品"
-  );
-  const quantity = firstPresent(
-    record.quantity,
-    record.count,
-    record.amount,
-    record.dose,
-    payload.quantity,
-    payload.count,
-    payload.amount,
-    payload.dose
-  );
-  const unit = firstPresent(record.unit, payload.unit, quantity !== "" ? "份" : "");
-  const slot = firstPresent(record.slot, record.hardware_slot, payload.slot);
-  const quantityText = quantity !== "" ? `${quantity}${unit}` : "";
-  const metaText = [quantityText || "数量未记录", slot ? `${slot} 号仓` : ""].filter(Boolean).join(" · ");
-  return {
-    id: `dose-${record._id || record.id || rawTime || medicine}`,
-    type: "dose",
-    typeLabel: "用药",
-    rawTime,
-    sortTime: parseTime(rawTime),
-    date: formatted.date,
-    time: formatted.time,
-    fullTime: formatted.full,
-    person,
-    medicine,
-    quantityText,
-    slot,
-    title: `${person} 已取药`,
-    subtitle: [medicine, metaText].filter(Boolean).join(" · "),
-    metaText,
-  };
-}
-
 function displayValue(value, unit) {
   if (value === undefined || value === null || value === "") return "--";
   return `${value}${unit || ""}`;
@@ -216,25 +88,16 @@ function normalizeVitalsRecord(record = {}, context = {}) {
   };
 }
 
-function buildDoseRecords(records = [], policy = null) {
-  return records
-    .filter(record => !medicationSafetyEvents.isMedicationSafetyEvent(record))
-    .filter(record => !policy || policy.allowsCurrentRecord(record, { allowUnlinked: true }))
-    .filter(record => isDispenseRecord(record) && isCompletedPhysicalDispense(record))
-    .map(normalizeDoseRecord)
-    .sort((a, b) => b.sortTime - a.sortTime);
-}
-
 function buildVitalsRecords(vitals = [], context = {}) {
   return vitals.map(record => normalizeVitalsRecord(record, context)).sort((a, b) => b.sortTime - a.sortTime);
 }
 
 function safetyCheckText(status) {
   return {
-    BLOCKED: "已阻止取药",
-    CHECK_FAILED: "未能完成安全核查",
-    PASSED: "安全核查通过",
-  }[status] || "核查状态未知";
+    BLOCKED: "存在明确用药风险",
+    CHECK_FAILED: "用药风险需要复核",
+    PASSED: "已完成用药风险核验",
+  }[status] || "风险状态未知";
 }
 
 function safetyReadText(state) {
@@ -256,8 +119,8 @@ function buildSafetyRecords(events = [], policy = null) {
       checkStatusText: safetyCheckText(record.checkStatus),
       readText: safetyReadText(record.readState),
       detailSummary: record.summary || (record.checkStatus === "CHECK_FAILED"
-        ? "人物或药品资料暂不足以完成可靠核查。"
-        : "本次安全核查已由药箱记录。"),
+        ? "人物或药品资料暂不足以完成可靠核验。"
+        : "本次用药风险核验已由终端记录。"),
       evidenceText: evidence || "版本证据暂未同步",
     });
   }).filter(record => !policy || policy.allowsCurrentRecord(record, { allowUnlinked: true }))
@@ -283,9 +146,8 @@ function safetyRecordMatchesDevice(record = {}, deviceId = "") {
   return !recordDeviceId || recordDeviceId === String(deviceId || "").trim();
 }
 
-function buildFeed(doseRecords, vitalsRecords, safetyRecords) {
+function buildFeed(vitalsRecords, safetyRecords) {
   return []
-    .concat(doseRecords || [])
     .concat(vitalsRecords || [])
     .concat(safetyRecords || [])
     .sort(compareRecordOrder);
@@ -303,7 +165,7 @@ function todayCount(records, type) {
 }
 
 function filterTitle(filter) {
-  return { all: "全部照护记录", dose: "用药记录", safety: "安全核查", vitals: "健康测量" }[filter] || "照护记录";
+  return { all: "全部照护记录", safety: "用药风险", vitals: "健康测量" }[filter] || "照护记录";
 }
 
 function safetyAvailabilityText(safetyState = {}) {
@@ -311,13 +173,12 @@ function safetyAvailabilityText(safetyState = {}) {
   if (safetyState.availability === "forbidden") return "当前微信账号无权查看该药箱。";
   if (safetyState.availability === "unknown") return "暂时无法确认安全记录是否为最新。";
   if (safetyState.availability === "error") return "安全记录读取失败，请稍后重试。";
-  return "暂无安全核查记录。";
+  return "暂无用药风险记录。";
 }
 
 function emptyTextFor(filter, safetyState = {}) {
   return {
     all: "暂时没有同步到照护记录。",
-    dose: "暂无用药记录。",
     safety: safetyAvailabilityText(safetyState),
     vitals: "暂无健康测量记录。",
   }[filter] || "暂时没有同步到照护记录。";
@@ -325,10 +186,8 @@ function emptyTextFor(filter, safetyState = {}) {
 
 function careStateForRecord(record) {
   if (!record) return { kind: "muted", label: "暂无记录" };
-  if (record.type === "safety") return record.state || { kind: "pending", label: "安全核查" };
-  return record.type === "vitals"
-    ? { kind: "normal", label: "健康测量" }
-    : { kind: "actionable", label: "用药记录" };
+  if (record.type === "safety") return record.state || { kind: "pending", label: "用药风险" };
+  return { kind: "normal", label: "健康测量" };
 }
 
 function safetyPaginationView(state = {}) {
@@ -349,7 +208,7 @@ function safetyPaginationView(state = {}) {
     : (status === "error" ? "加载失败，点击重试" : "加载更多安全记录");
   const hint = status === "error"
     ? (state.safetyPaginationError || "本页读取失败，已有记录仍可查看。")
-    : (status === "loading" ? "请稍候" : "继续查看更早的安全核查");
+    : (status === "loading" ? "请稍候" : "继续查看更早的用药风险");
   return {
     safetyPaginationVisible: visible,
     safetyPaginationLabel: label,
@@ -363,7 +222,7 @@ function buildRecordsCarePage(state = {}) {
   const pendingSafetyDetailRetry = state.pendingSafetyDetailRetry || null;
   const pendingSafetyDetailLoading = pendingSafetyDetailRetry && pendingSafetyDetailRetry.status === "loading";
   const focusRecord = visibleFeed[0];
-  const recordFilter = ["all", "dose", "safety", "vitals"].includes(state.recordFilter) ? state.recordFilter : "all";
+  const recordFilter = ["all", "safety", "vitals"].includes(state.recordFilter) ? state.recordFilter : "all";
   const focusTitle = focusRecord
     ? ([focusRecord.title, focusRecord.time || focusRecord.date].filter(Boolean).join(" · ") || "照护记录")
     : emptyTextFor(recordFilter, state.safetyState);
@@ -386,19 +245,8 @@ function buildRecordsCarePage(state = {}) {
     },
     overview: [
       {
-        key: "records-today-dose",
-        label: "今日用药",
-        value: Number(state.todayCount) || 0,
-        tone: "actionable",
-        action: {
-          id: "records-action-filter-dose-overview",
-          label: "筛选用药记录",
-          payload: { filter: "dose" },
-        },
-      },
-      {
         key: "records-today-safety",
-        label: "今日拦截",
+        label: "今日风险",
         value: state.safetyState && state.safetyState.availability === "ready"
           ? (state.safetyNextCursor
             ? `至少 ${Number(state.todaySafetyCount) || 0}`
@@ -411,7 +259,7 @@ function buildRecordsCarePage(state = {}) {
           : (state.safetyState && ["unknown", "error", "forbidden"].includes(state.safetyState.availability) ? "warn" : "muted"),
         action: state.safetyState && state.safetyState.availability === "ready" && state.todaySafetyCount ? {
           id: "records-action-filter-safety-overview",
-          label: "筛选安全核查记录",
+          label: "筛选用药风险记录",
           payload: { filter: "safety" },
         } : null,
       },
@@ -431,20 +279,20 @@ function buildRecordsCarePage(state = {}) {
       {
         key: "records-pending-safety-detail",
         intent: "navigation",
-        title: "安全核查详情未打开",
+        title: "用药风险详情未打开",
         supporting: pendingSafetyDetailRetry.message || "详情读取失败，请检查网络后重试。",
         items: [
           {
             key: "records-pending-safety-detail-retry",
             symbol: "safety",
-            title: pendingSafetyDetailLoading ? "正在重新读取安全核查" : "重试打开安全核查",
+            title: pendingSafetyDetailLoading ? "正在重新读取用药风险" : "重试打开用药风险",
             supporting: pendingSafetyDetailLoading
               ? "正在读取原安全事件，请稍候。"
               : "仅在点击后重新读取，不会随页面刷新重复请求。",
             state: { kind: "pending", label: pendingSafetyDetailLoading ? "读取中" : "可重试" },
             action: pendingSafetyDetailLoading ? null : {
               id: "records-action-retry-pending-safety",
-              label: "重试打开安全核查",
+              label: "重试打开用药风险",
             },
           },
         ],
@@ -474,22 +322,12 @@ function buildRecordsCarePage(state = {}) {
             },
           },
           {
-            key: "records-filter-dose",
-            label: "用药",
-            active: recordFilter === "dose",
-            action: {
-              id: "records-action-filter-dose",
-              label: "筛选用药记录",
-              payload: { filter: "dose" },
-            },
-          },
-          {
             key: "records-filter-safety",
-            label: "安全核查",
+            label: "用药风险",
             active: recordFilter === "safety",
             action: {
               id: "records-action-filter-safety",
-              label: "筛选安全核查记录",
+              label: "筛选用药风险记录",
               payload: { filter: "safety" },
             },
           },
@@ -506,7 +344,7 @@ function buildRecordsCarePage(state = {}) {
         ],
         items: previewFeed.map((record, index) => ({
           key: `records-item-${record.id || index}`,
-          symbol: record.type === "vitals" ? "measure" : (record.type === "safety" ? "safety" : "medicine"),
+          symbol: record.type === "vitals" ? "measure" : "safety",
           title: record.title,
           supporting: record.subtitle,
           meta: [record.time, record.date].filter(Boolean).join(" · "),
@@ -547,13 +385,11 @@ function clearedRecordsScope(deviceId, recordFilter = "all") {
   return {
     carePage: loadingCarePage("照护记录", "正在同步当前药箱的照护记录…"),
     device: {},
-    doseRecords: [],
     vitalsRecords: [],
     safetyRecords: [],
     feed: [],
     visibleFeed: [],
     previewFeed: [],
-    todayCount: 0,
     todaySafetyCount: 0,
     todayVitalsCount: 0,
     safetyState,
@@ -564,7 +400,7 @@ function clearedRecordsScope(deviceId, recordFilter = "all") {
     safetyPaginationError: "",
     safetyPaginationVisible: false,
     safetyPaginationLabel: "加载更多安全记录",
-    safetyPaginationHint: "继续查看更早的安全核查",
+    safetyPaginationHint: "继续查看更早的用药风险",
     pendingSafetyDetailRetry: null,
     emptyText: emptyTextFor(recordFilter, safetyState),
     stale: false,
@@ -579,14 +415,12 @@ Page({
   data: {
     carePage: loadingCarePage("照护记录", "正在同步最近的照护记录…"),
     device: {},
-    doseRecords: [],
     vitalsRecords: [],
     safetyRecords: [],
     feed: [],
     visibleFeed: [],
     previewFeed: [],
     recordFilter: "all",
-    todayCount: 0,
     todaySafetyCount: 0,
     todayVitalsCount: 0,
     safetyState: { availability: "unknown", events: [], message: "暂时无法确认安全记录是否为最新" },
@@ -597,7 +431,7 @@ Page({
     safetyPaginationError: "",
     safetyPaginationVisible: false,
     safetyPaginationLabel: "加载更多安全记录",
-    safetyPaginationHint: "继续查看更早的安全核查",
+    safetyPaginationHint: "继续查看更早的用药风险",
     pendingSafetyDetailRetry: null,
     emptyText: "暂时没有同步到照护记录。",
     stale: false,
@@ -626,7 +460,7 @@ Page({
   startRealtime() {
     this.stopRealtime();
     this._stopRealtime = realtime.subscribe(() => this.load(), null, {
-      collections: ["devices", "records", "vitals"],
+      collections: ["devices", "vitals"],
       intervalMs: 20000,
       immediate: false,
     });
@@ -671,9 +505,8 @@ Page({
     const loadGeneration = Number(this._loadGeneration || 0) + 1;
     this._loadGeneration = loadGeneration;
     try {
-      const [device, records, vitals, safetyState, snapshotRead] = await Promise.all([
+      const [device, vitals, safetyState, snapshotRead] = await Promise.all([
         api.getDevice(requestDeviceId),
-        api.getRecentRecordsStrict(80, requestDeviceId),
         api.getRecentVitalsStrict(80, requestDeviceId),
         medicationSafetyEventModule.list({ limit: 50, deviceId: requestDeviceId }),
         api.getSnapshotStrict({ inquiryLimit: 1, deviceId: requestDeviceId }),
@@ -691,7 +524,6 @@ Page({
         serviceUsersSnapshotComplete: snapshot.serviceUsersSnapshotComplete === true,
       });
       this._personaPolicy = personaPolicy;
-      const doseRecords = buildDoseRecords(records, personaPolicy);
       const vitalsRecords = buildVitalsRecords(vitals, {
         activeUsers: personaPolicy.activeUsers(),
         capabilitySnapshot,
@@ -721,10 +553,9 @@ Page({
       const safetyPaginationStatus = preserveLoadedPages && this.data.safetyPaginationStatus === "loading"
         ? "loading"
         : (safetyNextCursor ? "idle" : "done");
-      const feed = buildFeed(doseRecords, vitalsRecords, safetyRecords);
+      const feed = buildFeed(vitalsRecords, safetyRecords);
       this.applyRecordFilter(this.data.recordFilter, feed, {
         device,
-        doseRecords,
         vitalsRecords,
         safetyRecords,
         safetyState: effectiveSafetyState,
@@ -735,7 +566,6 @@ Page({
         safetyPaginationError: "",
         feed,
         stale: transientSafetyFailure,
-        todayCount: todayCount(feed, "dose"),
         todaySafetyCount: todayCount(
           safetyRecords.filter(item => item.checkStatus === "BLOCKED"),
           "safety",
@@ -767,7 +597,7 @@ Page({
   },
 
   applyRecordFilter(filter, source, patch = {}) {
-    const nextFilter = ["all", "dose", "safety", "vitals"].includes(filter) ? filter : "all";
+    const nextFilter = ["all", "safety", "vitals"].includes(filter) ? filter : "all";
     const feed = Array.isArray(source) ? source : (patch.feed || this.data.feed || []);
     const visibleFeed = nextFilter === "all" ? feed : feed.filter(item => item.type === nextFilter);
     const nextData = Object.assign({}, patch, {
@@ -853,7 +683,7 @@ Page({
 
     const incoming = buildSafetyRecords(pageState.events || [], this._personaPolicy);
     const safetyRecords = mergeSafetyRecords(this.data.safetyRecords || [], incoming);
-    const feed = buildFeed(this.data.doseRecords || [], this.data.vitalsRecords || [], safetyRecords);
+    const feed = buildFeed(this.data.vitalsRecords || [], safetyRecords);
     const safetyNextCursor = nextCursor;
     this.applyRecordFilter(this.data.recordFilter, feed, {
       safetyRecords,
@@ -880,7 +710,7 @@ Page({
     this.setData({
       detailVisible: true,
       detailMode: "record",
-      detailTitle: record.type === "dose" ? "用药记录" : (record.type === "safety" ? "安全核查" : "健康测量"),
+      detailTitle: record.type === "safety" ? "用药风险" : "健康测量",
       detailList: [record],
     });
     if (record.type === "safety") {
@@ -954,7 +784,7 @@ Page({
   replaceSafetyRecord(record, requestDeviceId = this.data.safetyDeviceId) {
     if (!this.isDeviceScopeCurrent(requestDeviceId) || !safetyRecordMatchesDevice(record, requestDeviceId)) return;
     const safetyRecords = (this.data.safetyRecords || []).map(item => item.id === record.id ? record : item);
-    const feed = buildFeed(this.data.doseRecords || [], this.data.vitalsRecords || [], safetyRecords);
+    const feed = buildFeed(this.data.vitalsRecords || [], safetyRecords);
     const recordFilter = this.data.recordFilter || "all";
     const visibleFeed = recordFilter === "all" ? feed : feed.filter(item => item.type === recordFilter);
     const detailList = (this.data.detailList || []).map(item => item.id === record.id ? record : item);
@@ -990,7 +820,7 @@ Page({
       eventId,
       deviceId: scopeDeviceId,
       status: "loading",
-      message: "正在重新读取安全核查详情…",
+      message: "正在重新读取用药风险详情…",
     });
 
     let record;
@@ -1016,14 +846,14 @@ Page({
           eventId,
           deviceId: scopeDeviceId,
           status: "error",
-          message: "仍未能读取安全核查详情，请检查网络后再次重试。",
+          message: "仍未能读取用药风险详情，请检查网络后再次重试。",
         });
       }
       return;
     }
 
     const safetyRecords = mergeSafetyRecords(this.data.safetyRecords || [], [record]);
-    const feed = buildFeed(this.data.doseRecords || [], this.data.vitalsRecords || [], safetyRecords);
+    const feed = buildFeed(this.data.vitalsRecords || [], safetyRecords);
     this.applyRecordFilter("safety", feed, {
       safetyRecords,
       feed,
@@ -1032,7 +862,7 @@ Page({
     this.setData({
       detailVisible: true,
       detailMode: "record",
-      detailTitle: "安全核查",
+      detailTitle: "用药风险",
       detailList: [record],
     });
     return this.markSafetyRecordRead(record, scopeDeviceId, detailRequestId);
@@ -1082,18 +912,18 @@ Page({
           eventId: String(pending.eventId || "").trim(),
           deviceId: scopeDeviceId,
           status: "error",
-          message: "安全核查详情读取失败，请检查网络后重试。",
+          message: "用药风险详情读取失败，请检查网络后重试。",
         });
         return;
       }
       if (!record) return;
       const safetyRecords = mergeSafetyRecords(this.data.safetyRecords || [], [record]);
-      const feed = buildFeed(this.data.doseRecords || [], this.data.vitalsRecords || [], safetyRecords);
+      const feed = buildFeed(this.data.vitalsRecords || [], safetyRecords);
       this.applyRecordFilter("safety", feed, { safetyRecords, feed });
       this.setData({
         detailVisible: true,
         detailMode: "record",
-        detailTitle: "安全核查",
+        detailTitle: "用药风险",
         detailList: [record],
       });
       return this.markSafetyRecordRead(record, scopeDeviceId, detailRequestId);
@@ -1129,11 +959,6 @@ Page({
       const record = (this.data.feed || []).find(item => item.id === payload.recordId);
       return this.openRecord(record);
     }
-  },
-
-  showDoseDetails() {
-    this.applyRecordFilter("dose");
-    this.showAllRecords();
   },
 
   showVitalsDetails() {

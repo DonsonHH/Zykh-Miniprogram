@@ -3,7 +3,7 @@ const assert = require("node:assert/strict");
 
 const safetyEvents = require("../miniprogram/modules/medicationSafetyEvents");
 
-test("a blocked safety event with a medicine name is never presented as taken medicine", () => {
+test("a blocked safety event is presented as a person-specific medication risk", () => {
   const event = safetyEvents.normalizeMedicationSafetyEvent({
     type: "MEDICATION_SAFETY_CHECK",
     event_id: "safety-wang-001",
@@ -34,13 +34,95 @@ test("a blocked safety event with a medicine name is never presented as taken me
 
   const record = safetyEvents.projectRecords([event])[0];
   assert.equal(record.type, "safety");
-  assert.equal(record.title, "王奶奶 · 已阻止取药");
+  assert.equal(record.title, "王奶奶 · 存在明确用药风险");
   assert.match(record.subtitle, /布洛芬缓释胶囊/);
-  assert.match(record.subtitle, /药箱未出药/);
+  assert.match(record.subtitle, /不建议自行使用/);
   assert.doesNotMatch(record.title, /已取药/);
 });
 
-test("unknown safety states fail closed and physical dispense requires positive evidence", () => {
+test("caregiver summaries remove obsolete dispensing hardware wording", () => {
+  const event = safetyEvents.normalizeMedicationSafetyEvent({
+    type: "MEDICATION_SAFETY_EVENT",
+    event_id: "legacy-hardware-copy",
+    person_display_name: "张三",
+    medicine_name: "阿莫西林胶囊",
+    check_status: "BLOCKED",
+    caregiver_summary: "已登记青霉素过敏；本次已阻止取药，柜门未打开。",
+  });
+
+  assert.equal(event.summary, "已登记青霉素过敏。");
+  assert.doesNotMatch(event.summary, /取药|柜门|舵机|出药/);
+});
+
+test("risk registry groups repeated checks by person generation and medicine", () => {
+  const normalize = safetyEvents.normalizeMedicationSafetyEvent;
+  const events = [
+    normalize({
+      type: "MEDICATION_SAFETY_EVENT",
+      event_id: "risk-old",
+      service_user_id: "person-a",
+      persona_generation: "g1",
+      person_display_name: "张三",
+      medicine_id: "medicine-a",
+      medicine_name: "布洛芬",
+      check_status: "BLOCKED",
+      reason_codes: ["CONTRAINDICATION"],
+      occurred_at: "2026-08-18 09:00:00",
+      read_state: "READ",
+    }),
+    normalize({
+      type: "MEDICATION_SAFETY_EVENT",
+      event_id: "risk-new",
+      service_user_id: "person-a",
+      persona_generation: "g1",
+      person_display_name: "张三",
+      medicine_id: "medicine-a",
+      medicine_name: "布洛芬",
+      check_status: "BLOCKED",
+      reason_codes: ["DRUG_INTERACTION"],
+      occurred_at: "2026-08-19 09:00:00",
+      read_state: "UNREAD",
+    }),
+    normalize({
+      type: "MEDICATION_SAFETY_EVENT",
+      event_id: "risk-review",
+      service_user_id: "person-b",
+      persona_generation: "g1",
+      person_display_name: "李四",
+      medicine_id: "medicine-b",
+      medicine_name: "阿莫西林",
+      check_status: "CHECK_FAILED",
+      reason_codes: ["PROFILE_INCOMPLETE"],
+      occurred_at: "2026-08-19 08:00:00",
+      read_state: "UNREAD",
+    }),
+  ];
+
+  const registry = safetyEvents.projectRiskRegistry(events);
+  assert.equal(registry.blocked.length, 1);
+  assert.equal(registry.review.length, 1);
+  assert.equal(registry.blocked[0].eventId, "risk-new");
+  assert.equal(registry.blocked[0].occurrenceCount, 2);
+  assert.equal(registry.blocked[0].unreadCount, 1);
+  assert.deepEqual(registry.blocked[0].reasonCodes.sort(), ["CONTRAINDICATION", "DRUG_INTERACTION"]);
+
+  const resolved = safetyEvents.projectRiskRegistry(events.concat(normalize({
+    type: "MEDICATION_SAFETY_EVENT",
+    event_id: "risk-resolved",
+    service_user_id: "person-a",
+    persona_generation: "g1",
+    person_display_name: "张三",
+    medicine_id: "medicine-a",
+    medicine_name: "布洛芬",
+    check_status: "PASSED",
+    occurred_at: "2026-08-20 09:00:00",
+    read_state: "READ",
+  })));
+  assert.equal(resolved.blocked.length, 0);
+  assert.equal(resolved.review.length, 1);
+});
+
+test("unknown safety states fail closed while legacy dispense evidence remains readable", () => {
   const unknown = safetyEvents.normalizeMedicationSafetyEvent({
     event_id: "safety-unknown",
     check_status: "MAYBE",
@@ -57,7 +139,7 @@ test("unknown safety states fail closed and physical dispense requires positive 
     medicine_name: "任意药品",
   });
   assert.equal(safetyEvents.isCompletedPhysicalDispense(hardwareFailed), false);
-  assert.match(safetyEvents.eventPresentation(hardwareFailed).title, /开柜失败/);
+  assert.match(safetyEvents.eventPresentation(hardwareFailed).title, /已完成用药风险核验/);
   assert.doesNotMatch(safetyEvents.eventPresentation(hardwareFailed).title, /已取药/);
 
   assert.equal(safetyEvents.isCompletedPhysicalDispense({
@@ -101,7 +183,7 @@ test("an old cloud revision is reported as unsupported without calling an unknow
   const result = await module.list({ limit: 10, unreadOnly: true });
 
   assert.equal(result.availability, "unsupported");
-  assert.equal(result.message, "当前云端版本尚未支持安全记录");
+  assert.equal(result.message, "当前云端版本尚未支持用药风险记录");
   assert.deepEqual(result.events, []);
   assert.equal(listCalls, 0);
 });
@@ -132,7 +214,7 @@ test("capability and event read failures stay distinguishable from a real empty 
   });
   const empty = await emptyHistory.list();
   assert.equal(empty.availability, "ready");
-  assert.equal(empty.message, "暂无安全核查记录");
+  assert.equal(empty.message, "暂无用药风险记录");
 });
 
 test("malformed list and detail responses fail closed instead of becoming caregiver facts", async () => {

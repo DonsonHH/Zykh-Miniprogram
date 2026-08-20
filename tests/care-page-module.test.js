@@ -83,6 +83,31 @@ test("care page can activate its one focus action from the whole surface without
   assert.match(behavior, /onFocusOpen\(\)[\s\S]*focus\.activation !== "surface"[\s\S]*focus\.action[\s\S]*"focus"/);
 });
 
+test("care page normalizes a bounded focus progress for daily care", () => {
+  const model = composeCarePage({
+    key: "home-progress",
+    title: "家庭照护",
+    focus: {
+      eyebrow: "今日照护进度",
+      title: "18:30 · 张三",
+      supporting: "降压药 · 1片",
+      progress: { current: 2, total: 6, label: "今日已完成" },
+    },
+  });
+  const layout = fs.readFileSync(path.join(__dirname, "../miniprogram/components/careScreen/index.wxml"), "utf8");
+
+  assert.deepEqual(model.focus.progress, {
+    current: 2,
+    total: 6,
+    label: "今日已完成",
+    percent: 33,
+    ariaLabel: "今日已完成 2/6",
+  });
+  assert.match(model.focus.ariaLabel, /今日已完成/);
+  assert.match(layout, /wx:if="\{\{model\.focus\.progress\}\}"/);
+  assert.match(layout, /model\.focus\.progress\.percent/);
+});
+
 test("care screen emits a surface focus once and keeps button or disabled focuses inert", () => {
   let definition = null;
   const source = fs.readFileSync(path.join(__dirname, "../miniprogram/components/careScreen/index.js"), "utf8");

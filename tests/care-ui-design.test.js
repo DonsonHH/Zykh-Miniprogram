@@ -7,7 +7,7 @@ const assert = require("node:assert/strict");
 const root = path.join(__dirname, "..");
 const miniRoot = path.join(root, "miniprogram");
 const carePages = ["index", "cabinet", "vitals", "records", "ai", "settings", "familyDetail"];
-const primaryTabs = ["index", "cabinet", "ai", "records", "settings"];
+const primaryTabs = ["index", "library", "ai", "records", "settings"];
 
 function pageFile(page, name) {
   return path.join(miniRoot, "pages", page, name);
@@ -298,5 +298,5 @@ test("retired template demo code stays removed from the shipped Mini Program", (
 test("the five-tab navigation keeps the care vocabulary", () => {
   const app = JSON.parse(read(path.join(miniRoot, "app.json")));
   assert.deepEqual(app.tabBar.list.map(item => item.pagePath), primaryTabs.map(page => `pages/${page}/index`));
-  assert.deepEqual(app.tabBar.list.map(item => item.text), ["首页", "药箱", "问询", "照护", "家人"]);
+  assert.deepEqual(app.tabBar.list.map(item => item.text), ["首页", "药库", "问询", "照护", "家人"]);
 });

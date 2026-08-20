@@ -5,7 +5,7 @@
 - 微信开发者工具 Stable
 - 已创建的小程序与 CloudBase 环境
 - 对目标 CloudBase 环境拥有云函数部署权限
-- 已完成 Station 端 `2.7-runtime-consistency` 协议部署
+- 已完成 Station 端 `3.0-three-box-library` 协议迁移
 
 不要把设备密钥、数据库或一次性配对码写进仓库。
 
@@ -25,7 +25,7 @@
 ```json
 {
   "schemaVersion": 2,
-  "schemaRevision": "2.7-runtime-consistency"
+  "schemaRevision": "3.0-three-box-library"
 }
 ```
 
@@ -45,10 +45,11 @@
 ## 5. 发布小程序
 
 1. 在开发者工具完成编译与真机预览。
-2. 验证首页、药箱、问询、照护、家人五个 Tab。
-3. 验证切换药箱不会显示旧药箱数据。
-4. 验证 Station 离线时显示最后同步时间，而不是假在线或空数据。
-5. 上传代码并在微信公众平台提交审核。
+2. 验证首页、药库、问询、照护、家人五个 Tab。
+3. 验证药库只显示日常、对症、护理三个药盒，不出现 23 仓或开柜入口。
+4. 验证切换设备不会显示上一台设备的数据。
+5. 验证 Station 离线时显示最后同步时间，而不是假在线或空数据。
+6. 上传代码并在微信公众平台提交审核。
 
 ## 6. 自动化验证
 
@@ -57,8 +58,8 @@ node --test tests/*.test.js
 node tools/validate-miniprogram-ui.js
 ```
 
-V1 发布门槛是 428 项测试与 UI 校验全部通过。
+当前发布门槛是全部自动化测试与 UI 校验通过。
 
 ## 7. 回滚与兼容
 
-本仓库的 `v1.0.0` 是 V1 最终版。若线上 CloudBase 或 Station 尚未升级，不要通过伪造 capability 强行开启新功能；小程序会对明确缺失的能力显示“未支持”。跨协议的不兼容升级应使用 V2 版本和独立迁移说明。
+若线上 CloudBase 或 Station 尚未升级，不要通过伪造 capability 强行开启三盒药库；小程序会对明确缺失的能力显示“未支持”或“待确认”。部署前必须完成 [三盒架构迁移](THREE_BOX_MIGRATION.md) 并备份旧数据。

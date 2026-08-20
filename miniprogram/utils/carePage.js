@@ -93,6 +93,25 @@ function normalizeFocusActivation(value, action) {
   return activation;
 }
 
+function normalizeProgress(value) {
+  if (!value || typeof value !== "object") return null;
+  const totalValue = Number(value.total);
+  const currentValue = Number(value.current);
+  const total = Number.isFinite(totalValue) ? Math.max(0, Math.round(totalValue)) : 0;
+  if (!total) return null;
+  const current = Number.isFinite(currentValue)
+    ? Math.min(total, Math.max(0, Math.round(currentValue)))
+    : 0;
+  const label = text(value.label, `已完成 ${current}/${total}`);
+  return {
+    current,
+    total,
+    label,
+    percent: Math.round((current / total) * 100),
+    ariaLabel: `${label} ${current}/${total}`,
+  };
+}
+
 function normalizePhase(value) {
   const raw = typeof value === "string" ? { kind: value } : (value || {});
   const kind = ["ready", "loading", "empty", "error"].includes(raw.kind) ? raw.kind : "ready";
@@ -217,6 +236,7 @@ function composeCarePage(spec = {}) {
   const focusEyebrow = text(focusSource.eyebrow || focusSource.label);
   const focusTitle = text(focusSource.title);
   const focusSupporting = text(focusSource.supporting || focusSource.body || focusSource.description);
+  const focusProgress = normalizeProgress(focusSource.progress);
 
   const overview = (spec.overview || spec.facts || []).map(normalizeFact);
   if (overview.length > 4) throw new CarePageError("care page overview supports at most four facts");
@@ -231,6 +251,7 @@ function composeCarePage(spec = {}) {
       eyebrow: focusEyebrow,
       title: focusTitle,
       supporting: focusSupporting,
+      progress: focusProgress,
       state: focusState,
       action: focusAction,
       activation: focusActivation,
@@ -238,6 +259,7 @@ function composeCarePage(spec = {}) {
         focusEyebrow,
         focusTitle,
         focusSupporting,
+        focusProgress && focusProgress.label,
         focusState && focusState.label,
         focusActivation === "surface" && focusAction && focusAction.label,
       ]

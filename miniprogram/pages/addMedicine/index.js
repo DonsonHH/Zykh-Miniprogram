@@ -14,7 +14,7 @@ function emptyForm() {
   return {
     name: "",
     spec: "",
-    // 一个物理仓位只需要表明“仓内有药”。取药后是否变空由药箱现场确认。
+    // 当前只登记该药品是否仍有库存，库存状态由药箱现场确认后同步。
     quantity: "1",
     expireDate: "",
     expiryPrecision: "month",

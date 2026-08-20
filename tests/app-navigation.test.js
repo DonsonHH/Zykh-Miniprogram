@@ -9,12 +9,12 @@ test("five tabs follow the family-care journey and use the shared Station palett
 
   assert.deepEqual(tabs.map(item => item.pagePath), [
     "pages/index/index",
-    "pages/cabinet/index",
+    "pages/library/index",
     "pages/ai/index",
     "pages/records/index",
     "pages/settings/index",
   ]);
-  assert.deepEqual(tabs.map(item => item.text), ["首页", "药箱", "问询", "照护", "家人"]);
+  assert.deepEqual(tabs.map(item => item.text), ["首页", "药库", "问询", "照护", "家人"]);
   assert.equal(app.window.backgroundColor, "#F6F9FC");
   assert.equal(app.window.navigationBarBackgroundColor, "#F6F9FC");
 });

@@ -60,7 +60,7 @@ function normalizedCheckStatus(value) {
 
 function normalizedDispenseStatus(value) {
   const status = textValue(value).trim().toUpperCase();
-  return new Set(["NOT_STARTED", "BLOCKED", "DISPENSED", "HARDWARE_FAILED", "RESULT_UNKNOWN"]).has(status)
+  return new Set(["NOT_APPLICABLE", "NOT_STARTED", "BLOCKED", "DISPENSED", "HARDWARE_FAILED", "RESULT_UNKNOWN"]).has(status)
     ? status
     : "NOT_STARTED";
 }

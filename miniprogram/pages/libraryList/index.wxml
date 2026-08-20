@@ -1,0 +1,115 @@
+<view class="page care-page library-list-page">
+  <app-header
+    title="药品清单"
+    eyebrow="家庭药库"
+    subtitle="{{viewMedicines.length}} 种药品"
+    online="{{device.online}}"
+    status-text="{{initialLoading ? '正在读取' : ''}}"
+    status-hint="{{initialLoading ? '请稍候' : ''}}"
+  />
+
+  <view wx:if="{{initialLoading}}" class="ui-surface ui-loading library-list-loading">
+    <view class="ui-loading__spinner"></view>
+    <view class="ui-loading__text">正在读取药品清单…</view>
+  </view>
+
+  <view wx:elif="{{loadError}}" class="ui-surface library-list-error">
+    <view class="library-list-error__title">暂时无法读取药品</view>
+    <view class="library-list-error__message">{{loadError}}</view>
+    <button class="library-list-error__retry" bindtap="retryLoad">重新读取</button>
+  </view>
+
+  <block wx:else>
+    <view wx:if="{{stale}}" class="ui-surface library-list-stale">
+      <view class="library-list-stale__copy">{{refreshError}}</view>
+      <button class="library-list-stale__retry" bindtap="retryLoad">重新读取</button>
+    </view>
+
+    <view class="ui-surface library-tools">
+      <view class="library-search">
+        <text class="library-search__icon">⌕</text>
+        <input value="{{keyword}}" bindinput="onSearch" placeholder="搜索药品或规格" aria-label="搜索药品或规格" />
+      </view>
+
+      <scroll-view class="library-box-scroll" scroll-x enhanced show-scrollbar="{{false}}">
+        <view class="library-box-row" aria-role="tablist" aria-label="药盒分类">
+          <view
+            wx:for="{{boxes}}"
+            wx:key="id"
+            class="library-box-tab {{box === item.id ? 'is-active' : ''}}"
+            data-box="{{item.id}}"
+            bindtap="setBox"
+            hover-class="tap-feedback"
+            aria-role="tab"
+            aria-selected="{{box === item.id}}"
+          >{{item.shortLabel}}</view>
+        </view>
+      </scroll-view>
+
+      <view class="library-filter-row" aria-role="tablist" aria-label="药品状态">
+        <view class="library-filter {{filter === 'all' ? 'is-active' : ''}}" data-filter="all" bindtap="setFilter">全部</view>
+        <view class="library-filter {{filter === 'attention' ? 'is-active is-warn' : ''}}" data-filter="attention" bindtap="setFilter">需关注</view>
+        <view class="library-filter {{filter === 'depleted' ? 'is-active is-warn' : ''}}" data-filter="depleted" bindtap="setFilter">待补药</view>
+      </view>
+    </view>
+
+    <view class="ui-section">
+      <view wx:if="{{viewMedicines.length}}" class="ui-surface ui-list library-list">
+        <view
+          wx:for="{{viewMedicines}}"
+          wx:key="medicineId"
+          class="ui-list-row library-row"
+          data-id="{{item.medicineId || item._id}}"
+          bindtap="showMedicine"
+          hover-class="tap-feedback"
+          aria-role="button"
+          aria-label="查看{{item.name}}详情"
+        >
+          <view class="library-box-symbol library-box-symbol--{{item.storageBox}}">{{item.storageBoxSymbol}}</view>
+          <view class="ui-row-copy">
+            <view class="ui-row-title">{{item.name}}</view>
+            <view class="ui-row-subtitle">{{item.category || item.spec || '药品资料'}} · {{item.storageBoxLabel}}</view>
+            <view class="library-row__meta">{{item.stockText}} · {{item.expiryHint}}</view>
+          </view>
+          <view class="library-row__right">
+            <view class="ui-status {{item.statusClass === 'expired' ? 'ui-status--danger' : (item.isDepleted || item.statusClass === 'urgent' || item.statusClass === 'soon' ? 'ui-status--warn' : (item.isInventoryUnknown ? 'ui-status--muted' : 'ui-status--good'))}}">{{item.isDepleted ? '待补药' : (item.isInventoryUnknown ? '余量待确认' : item.expiryHint)}}</view>
+            <view class="library-row__expiry">{{item.expiryLabel || '效期待补'}}</view>
+          </view>
+          <view class="ui-chevron">›</view>
+        </view>
+      </view>
+      <view wx:else class="ui-surface ui-empty">{{emptyText}}</view>
+    </view>
+  </block>
+
+  <view wx:if="{{detailVisible}}" class="ui-sheet-mask" bindtap="closeDetail"></view>
+  <view wx:if="{{detailVisible}}" class="ui-sheet" catchtap="noop">
+    <view class="ui-sheet-grip"></view>
+    <view class="ui-sheet-head">
+      <view class="ui-sheet-title">药品详情</view>
+      <view class="ui-sheet-close" bindtap="closeDetail" aria-role="button">关闭</view>
+    </view>
+    <scroll-view scroll-y class="library-detail-scroll">
+      <view class="library-detail-hero">
+        <view class="library-box-symbol library-box-symbol--large library-box-symbol--{{selectedMedicine.storageBox}}">{{selectedMedicine.storageBoxSymbol}}</view>
+        <view class="library-detail-hero__copy">
+          <view class="library-detail-name">{{selectedMedicine.name}}</view>
+          <view class="library-detail-spec">{{selectedMedicine.spec || '规格待补充'}}</view>
+        </view>
+      </view>
+      <view class="library-detail-grid">
+        <view class="library-detail-item"><text>存放位置</text><view>{{selectedMedicine.storageBoxLabel}}</view></view>
+        <view class="library-detail-item"><text>余量状态</text><view>{{selectedMedicine.stockText}}</view></view>
+        <view class="library-detail-item"><text>有效期</text><view>{{selectedMedicine.expiryLabel || '待补充'}}</view></view>
+        <view class="library-detail-item"><text>生产厂家</text><view>{{selectedMedicine.manufacturer || '待补充'}}</view></view>
+        <view class="library-detail-item"><text>药品分类</text><view>{{selectedMedicine.category || '待补充'}}</view></view>
+        <view class="library-detail-item"><text>使用属性</text><view>{{selectedMedicine.isOtc === false ? '处方药/需专业指导' : '非处方药'}}</view></view>
+        <view wx:if="{{selectedMedicine.tagsText}}" class="library-detail-item library-detail-item--wide"><text>适用标签</text><view>{{selectedMedicine.tagsText}}</view></view>
+        <view wx:if="{{selectedMedicine.contraindicationsText}}" class="library-detail-item library-detail-item--wide library-detail-item--attention"><text>注意事项</text><view>{{selectedMedicine.contraindicationsText}}</view></view>
+        <view wx:if="{{selectedMedicine.safetyNote}}" class="library-detail-item library-detail-item--wide library-detail-item--guidance"><text>安全提醒</text><view>{{selectedMedicine.safetyNote}}</view></view>
+        <view class="library-detail-item library-detail-item--wide"><text>溯源码</text><view>{{selectedMedicine.traceCode || selectedMedicine.barcode || '未记录'}}</view></view>
+      </view>
+      <view wx:if="{{selectedMedicine.fixedCatalogMatch}}" class="library-detail-footnote">固定资料用于家庭管理，使用前请核对实物包装说明并遵循医生或药师指导。</view>
+    </scroll-view>
+  </view>
+</view>

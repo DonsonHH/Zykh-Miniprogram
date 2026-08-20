@@ -42,6 +42,20 @@
       </view>
       <view class="care-focus__title">{{model.focus.title}}</view>
       <view wx:if="{{model.focus.supporting}}" class="care-focus__supporting">{{model.focus.supporting}}</view>
+      <view
+        wx:if="{{model.focus.progress}}"
+        class="care-focus__progress"
+        aria-role="progressbar"
+        aria-label="{{model.focus.progress.ariaLabel}}"
+      >
+        <view class="care-focus__progress-copy">
+          <text>{{model.focus.progress.label}}</text>
+          <text>{{model.focus.progress.current}} / {{model.focus.progress.total}}</text>
+        </view>
+        <view class="care-focus__progress-track">
+          <view class="care-focus__progress-value" style="width: {{model.focus.progress.percent}}%;"></view>
+        </view>
+      </view>
       <button
         wx:if="{{model.focus.action && model.focus.activation === 'button'}}"
         class="care-primary"

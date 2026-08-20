@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "家庭药库",
+  "usingComponents": {
+    "care-screen": "/components/careScreen/index"
+  }
+}

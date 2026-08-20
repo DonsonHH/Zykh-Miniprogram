@@ -1,9 +1,9 @@
 {
   "pages": [
     "pages/index/index",
-    "pages/cabinet/index",
-    "pages/medicineList/index",
-    "pages/addMedicine/index",
+    "pages/library/index",
+    "pages/libraryList/index",
+    "pages/medicationRisks/index",
     "pages/vitals/index",
     "pages/records/index",
     "pages/ai/index",
@@ -30,8 +30,8 @@
         "selectedIconPath": "images/tabbar/home-active.png"
       },
       {
-        "pagePath": "pages/cabinet/index",
-        "text": "药箱",
+        "pagePath": "pages/library/index",
+        "text": "药库",
         "iconPath": "images/tabbar/medicine.png",
         "selectedIconPath": "images/tabbar/medicine-active.png"
       },

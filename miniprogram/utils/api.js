@@ -1,5 +1,7 @@
 const { daysUntil, normalizeExpiryDate } = require("./expiry");
 const { CABINET_SLOT_COUNT } = require("./cabinetSlots");
+const { storageBoxFor } = require("./medicineLibrary");
+const { enrichKnownMedicine } = require("../data/fixedMedicineCatalog");
 const { validateMedicationSafetyEventReadReceipt } = require("../modules/medicationSafetyEvents");
 
 const COLLECTIONS = {
@@ -285,8 +287,20 @@ function normalizeDevice(data = {}, requestDeviceId = "") {
 
 function normalizeMedicine(item) {
   const raw = item || {};
+  const known = enrichKnownMedicine(raw);
   const deviceId = raw.deviceId || appData().deviceId;
   const slot = normalizeMedicineSlot(raw.hardware_slot, raw.slot, 1);
+  const medicineId = String(firstPresent(
+    raw.medicineId,
+    raw.medicine_id,
+    known.fixedCatalogMatch ? known.medicineId : null,
+    raw.traceCode,
+    raw.trace_code,
+    raw.barcode,
+    raw.code,
+    raw._id,
+    `legacy-slot-${slot}`,
+  ) || "").trim();
   // Quantity is only a coarse count. Preserve an omitted value and leave all
   // inventory-state interpretation to the capability-aware projection layer.
   const rawQuantity = firstPresent(raw.quantity, raw.stock);
@@ -326,15 +340,32 @@ function normalizeMedicine(item) {
     raw.depletion_confirmation_source,
     "",
   );
-  return Object.assign({}, raw, {
-    _id: raw._id || medicineDocId(deviceId, slot),
+  const box = storageBoxFor(Object.assign({}, known, raw, { slot }));
+  return Object.assign({}, known, raw, {
+    _id: raw._id || `${deviceId}-medicine-${safeId(medicineId)}`,
     deviceId,
+    medicineId,
+    medicine_id: medicineId,
     slot,
-    name: raw.name || "",
+    legacySlot: slot,
+    storageBox: box.id,
+    storage_box: box.id,
+    storageBoxLabel: box.label,
+    name: firstPresent(raw.name, known.name, ""),
+    manufacturer: firstPresent(raw.manufacturer, raw.producer, known.manufacturer, ""),
+    barcode: firstPresent(raw.barcode, raw.code, known.barcode, ""),
+    traceCode: firstPresent(raw.traceCode, raw.trace_code, raw.barcode, raw.code, known.barcode, ""),
+    trace_code: firstPresent(raw.trace_code, raw.traceCode, raw.barcode, raw.code, known.barcode, ""),
+    category: firstPresent(raw.category, known.category, ""),
+    tags: Array.isArray(raw.tags) && raw.tags.length ? raw.tags : (known.tags || []),
+    contraindications: Array.isArray(raw.contraindications) && raw.contraindications.length
+      ? raw.contraindications
+      : (known.contraindications || []),
+    safetyNote: firstPresent(raw.safetyNote, raw.safety_note, known.safetyNote, ""),
     spec: firstPresent(raw.spec, raw.package_spec),
     quantity,
     stock: quantity,
-    unit: firstPresent(raw.unit, "盒"),
+    unit: firstPresent(raw.unit, known.unit, "盒"),
     expireDate,
     expire_date: expireDate,
     expiryConflict,
@@ -359,6 +390,12 @@ function normalizeMedicine(item) {
     lowStockLine: Number(firstPresent(raw.lowStockLine, raw.low_stock_line, 0)),
     category: raw.category || "",
     tags: raw.tags || [],
+    activeIngredients: firstPresent(raw.activeIngredients, raw.active_ingredients, []),
+    structuredContraindications: firstPresent(
+      raw.structuredContraindications,
+      raw.structured_contraindications,
+      [],
+    ),
     safetyNote: firstPresent(raw.safetyNote, raw.safety_note),
     updatedAt: raw.updatedAt || "",
   });

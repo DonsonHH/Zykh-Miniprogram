@@ -1,0 +1,6 @@
+{
+  "navigationBarTitleText": "药品清单",
+  "usingComponents": {
+    "app-header": "/components/appHeader/index"
+  }
+}

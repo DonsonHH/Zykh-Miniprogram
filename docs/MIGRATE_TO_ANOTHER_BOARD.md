@@ -1,5 +1,7 @@
 # 智药康护小程序与 QSM368 第二块板迁移指南
 
+> **其中 23 仓、仓位录药和开仓相关步骤已失效。** 迁移当前三盒版本前，必须先执行 [THREE_BOX_MIGRATION.md](THREE_BOX_MIGRATION.md)。本文件其余网络、密钥和 CloudBase 排障内容只可作为补充参考。
+
 > 新版完整交接手册请优先阅读：`docs/SYNC_AND_MIGRATION_GUIDE.md`。该文档补充了“小程序如何通过 CloudBase 与板端同步”、USB relay 临时链路、第二台电脑迁移步骤、验证流程和排障清单。
 
 本文给另一位工程师使用，目标是在另一台电脑、另一块 QSM368ZP-WF 开发板上接入同一个微信小程序和同一个 CloudBase 云环境。
@@ -305,7 +307,7 @@ adb shell "perl -c /userdata/zykh_app/scripts/cloud_agent.pl"
 ```sh
 CLOUD_API_URL=http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudbase.com/api
 DEVICE_ID=zykh-qsm-002
-DEVICE_SECRET=
+DEVICE_SECRET=<第二块板独立密钥>
 LOCAL_API=http://127.0.0.1:8080
 SYNC_INTERVAL=5
 ```
@@ -336,22 +338,17 @@ CLOUD_API_URL=http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudb
 adb shell "sed -i 's/\r$//' /userdata/zykh_app/data/cloud_agent.env"
 ```
 
-## 10. 配置设备密钥，开发阶段可跳过
+## 10. 配置设备密钥
 
-当前云函数逻辑支持两种模式：
+当前云函数使用拒绝优先策略：
 
 ```text
-DEVICE_SECRET 为空：开发模式放行
-DEVICE_SECRET / DEVICE_SECRETS 不为空：校验板端密钥
+云端未配置 DEVICE_SECRET / DEVICE_SECRETS：拒绝板端写入
+板端未提供或提供错误密钥：返回 unauthorized
+板端密钥与云端对应设备密钥一致：允许写入
 ```
 
-开发迁移阶段可以先留空：
-
-```sh
-DEVICE_SECRET=
-```
-
-正式演示或上线建议配置每台设备独立密钥。云函数环境变量配置：
+必须为每台设备配置独立密钥。云函数环境变量配置：
 
 ```json
 DEVICE_SECRETS={"zykh-qsm-001":"<第一块板独立密钥>","zykh-qsm-002":"<第二块板独立密钥>"}
@@ -494,7 +491,7 @@ Forwarding to http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudb
 ```sh
 CLOUD_API_URL=http://169.254.19.33:18080/api
 DEVICE_ID=zykh-qsm-002
-DEVICE_SECRET=
+DEVICE_SECRET=<第二块板独立密钥>
 LOCAL_API=http://127.0.0.1:8080
 SYNC_INTERVAL=5
 ```
