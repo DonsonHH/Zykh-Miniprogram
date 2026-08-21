@@ -94,13 +94,10 @@ test("a scoped refresh never opens a direct database watch for requested collect
   }
 });
 
-test("stopping a scoped refresh cancels polling and makes late timer callbacks inert", async () => {
+test("stopping a scoped refresh cancels its one-shot timer and makes late callbacks inert", async () => {
   const previousSetTimeout = global.setTimeout;
   const previousClearTimeout = global.clearTimeout;
-  const previousSetInterval = global.setInterval;
-  const previousClearInterval = global.clearInterval;
   const timeouts = new Map();
-  const intervals = new Map();
   let nextTimerId = 1;
   global.setTimeout = (callback, delay) => {
     const id = nextTimerId;
@@ -109,13 +106,6 @@ test("stopping a scoped refresh cancels polling and makes late timer callbacks i
     return id;
   };
   global.clearTimeout = id => timeouts.delete(id);
-  global.setInterval = (callback, delay) => {
-    const id = nextTimerId;
-    nextTimerId += 1;
-    intervals.set(id, { callback, delay });
-    return id;
-  };
-  global.clearInterval = id => intervals.delete(id);
   let refreshCount = 0;
 
   try {
@@ -129,26 +119,64 @@ test("stopping a scoped refresh cancels polling and makes late timer callbacks i
     await nextTurn();
     assert.equal(refreshCount, 1);
 
-    const poll = Array.from(intervals.values())[0];
+    const poll = Array.from(timeouts.values()).find(timer => timer.delay === 20000);
     assert.ok(poll);
-    assert.equal(poll.delay, 10000);
-    poll.callback();
-    const lateTimeout = Array.from(timeouts.values()).find(timer => timer.delay === 0);
-    assert.ok(lateTimeout);
 
     stop();
     assert.equal(timeouts.size, 0);
-    assert.equal(intervals.size, 0);
 
-    lateTimeout.callback();
     poll.callback();
     await nextTurn();
     assert.equal(refreshCount, 1);
   } finally {
     global.setTimeout = previousSetTimeout;
     global.clearTimeout = previousClearTimeout;
-    global.setInterval = previousSetInterval;
-    global.clearInterval = previousClearInterval;
+  }
+});
+
+test("polling waits for a slow refresh to settle before scheduling the next read", async () => {
+  const previousSetTimeout = global.setTimeout;
+  const previousClearTimeout = global.clearTimeout;
+  const timeouts = new Map();
+  let nextTimerId = 1;
+  global.setTimeout = (callback, delay) => {
+    const id = nextTimerId;
+    nextTimerId += 1;
+    timeouts.set(id, { callback, delay });
+    return id;
+  };
+  global.clearTimeout = id => timeouts.delete(id);
+  let finishRefresh;
+  const refresh = new Promise(resolve => { finishRefresh = resolve; });
+
+  try {
+    const stop = realtime.subscribe(() => refresh, null, { intervalMs: 20000 });
+    const immediateEntry = Array.from(timeouts.entries()).find(([, timer]) => timer.delay === 0);
+    assert.ok(immediateEntry);
+    timeouts.delete(immediateEntry[0]);
+    immediateEntry[1].callback();
+    await nextTurn();
+    assert.equal(timeouts.size, 0);
+
+    finishRefresh();
+    await nextTurn();
+    assert.equal(Array.from(timeouts.values()).filter(timer => timer.delay === 20000).length, 1);
+    stop();
+  } finally {
+    global.setTimeout = previousSetTimeout;
+    global.clearTimeout = previousClearTimeout;
+  }
+});
+
+test("the simulator polls less often while real devices retain the requested interval", () => {
+  const previousWx = global.wx;
+  try {
+    global.wx = { getDeviceInfo: () => ({ platform: "devtools" }) };
+    assert.equal(realtime.pollingInterval({ intervalMs: 20000 }), 60000);
+    global.wx = { getDeviceInfo: () => ({ platform: "ios" }) };
+    assert.equal(realtime.pollingInterval({ intervalMs: 20000 }), 20000);
+  } finally {
+    global.wx = previousWx;
   }
 });
 

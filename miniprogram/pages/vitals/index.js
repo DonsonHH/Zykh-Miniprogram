@@ -3,6 +3,7 @@ const realtime = require("../../utils/realtime");
 const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
 const { runAfterDeviceSessionReady } = require("../../utils/deviceSession");
 const vitalsAttribution = require("../../modules/vitalsAttribution");
+const { parseTimestamp } = require("../../utils/dateTime");
 
 const CARE_STATE_BY_MEASUREMENT = {
   danger: "risk",
@@ -28,9 +29,8 @@ function contextualDateTime(value, emptyLabel = "暂无测量数据") {
   if (value === undefined || value === null || value === "") return emptyLabel;
   const source = String(value).trim();
   if (!source) return emptyLabel;
-  const dateSource = source.indexOf("T") >= 0 ? source : source.replace(/-/g, "/");
-  const timestamp = Date.parse(dateSource);
-  if (!Number.isFinite(timestamp)) return source.slice(0, 16);
+  const timestamp = parseTimestamp(source);
+  if (timestamp === null) return source.slice(0, 16);
 
   const date = new Date(timestamp);
   const now = new Date();

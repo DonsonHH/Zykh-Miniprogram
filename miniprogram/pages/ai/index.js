@@ -3,11 +3,12 @@ const realtime = require("../../utils/realtime");
 const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
 const { createPersonaVisibilityPolicy } = require("../../modules/personaVisibility");
 const { runAfterDeviceSessionReady } = require("../../utils/deviceSession");
+const { parseTimestamp } = require("../../utils/dateTime");
 
 function inquiryTimeLabel(value) {
   if (!value) return "";
-  const timestamp = Date.parse(String(value).replace(/-/g, "/"));
-  if (!Number.isFinite(timestamp)) return String(value).slice(0, 16);
+  const timestamp = parseTimestamp(value);
+  if (timestamp === null) return String(value).slice(0, 16);
   const date = new Date(timestamp);
   const today = new Date();
   const time = `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
@@ -25,8 +26,8 @@ function inquiryTimeLabel(value) {
 }
 
 function sortByTime(a, b) {
-  const ta = Date.parse(String(a.updatedAt || a.createdAt || "").replace(/-/g, "/")) || 0;
-  const tb = Date.parse(String(b.updatedAt || b.createdAt || "").replace(/-/g, "/")) || 0;
+  const ta = parseTimestamp(a.updatedAt || a.createdAt || "") || 0;
+  const tb = parseTimestamp(b.updatedAt || b.createdAt || "") || 0;
   return tb - ta;
 }
 

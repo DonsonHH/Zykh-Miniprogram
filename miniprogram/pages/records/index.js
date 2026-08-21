@@ -6,6 +6,7 @@ const medicationSafetyEvents = require("../../modules/medicationSafetyEvents");
 const vitalsAttribution = require("../../modules/vitalsAttribution");
 const personaVisibility = require("../../modules/personaVisibility");
 const { mergeCapabilitySnapshots } = require("../../modules/capabilitySnapshot");
+const { parseTimestamp } = require("../../utils/dateTime");
 
 const RECORD_PREVIEW_LIMIT = 4;
 const medicationSafetyEventModule = medicationSafetyEvents.createMedicationSafetyEventModule(api);
@@ -18,8 +19,7 @@ function firstPresent(...values) {
 }
 
 function parseTime(value) {
-  const time = Date.parse(String(value || "").replace(/-/g, "/"));
-  return Number.isFinite(time) ? time : 0;
+  return parseTimestamp(value) || 0;
 }
 
 function pad(value) {

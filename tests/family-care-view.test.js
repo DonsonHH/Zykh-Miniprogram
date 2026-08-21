@@ -36,6 +36,7 @@ function loadSettingsPage(api, context = {}) {
       definition = page;
     },
     require(modulePath) {
+      if (modulePath.includes("dateTime")) return require("../miniprogram/utils/dateTime");
       if (modulePath.includes("carePlan")) return require("../miniprogram/utils/carePlan");
       if (modulePath.includes("carePage")) return require("../miniprogram/utils/carePage");
       if (modulePath.includes("medicationSafetyEvents")) return require("../miniprogram/modules/medicationSafetyEvents");

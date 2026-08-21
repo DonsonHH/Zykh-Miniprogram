@@ -4,6 +4,7 @@ const { isDoneStatus, isPlanActionable, isPlanDueToday, planTimeValue } = requir
 const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
 const medicationSafetyEvents = require("../../modules/medicationSafetyEvents");
 const personaVisibility = require("../../modules/personaVisibility");
+const { parseTimestamp } = require("../../utils/dateTime");
 
 const medicationSafetyEventModule = medicationSafetyEvents.createMedicationSafetyEventModule(api);
 
@@ -139,7 +140,7 @@ function safetyEventMatchesMember(member = {}, event = {}) {
 
 function safetyEventTime(event = {}) {
   const value = firstPresent(event.occurredAt, event.occurred_at, event.createdAt, event.created_at);
-  return Date.parse(String(value || "").replace(/-/g, "/")) || 0;
+  return parseTimestamp(value) || 0;
 }
 
 function safetyOutcomeText(event = {}) {

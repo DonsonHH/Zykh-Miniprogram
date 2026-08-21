@@ -16,6 +16,7 @@ const medicationSafetyEvents = require("../../modules/medicationSafetyEvents");
 const personaVisibility = require("../../modules/personaVisibility");
 const vitalsAttribution = require("../../modules/vitalsAttribution");
 const { mergeCapabilitySnapshots } = require("../../modules/capabilitySnapshot");
+const { parseDate, parseTimestamp } = require("../../utils/dateTime");
 
 const medicationSafetyEventModule = medicationSafetyEvents.createMedicationSafetyEventModule(api);
 
@@ -84,10 +85,7 @@ function clockTime(value) {
 }
 
 function localDate(value) {
-  if (!value) return null;
-  const normalized = String(value).trim().replace(/-/g, "/").replace("T", " ");
-  const date = new Date(normalized);
-  return Number.isNaN(date.getTime()) ? null : date;
+  return parseDate(value);
 }
 
 function isSameCalendarDay(left, right) {
@@ -123,9 +121,7 @@ function homeDisplayText(value, fallback = "") {
 }
 
 function sortValue(item) {
-  const text = String(item.rawTime || item.time || "").replace(/-/g, "/");
-  const time = Date.parse(text);
-  return Number.isFinite(time) ? time : 0;
+  return parseTimestamp(item.rawTime || item.time || "") || 0;
 }
 
 function vitalsToTimeline(record = {}, attributionContext = {}) {
@@ -593,7 +589,7 @@ Page({
 
   startRealtime() {
     this.stopRealtime();
-    this._stopRealtime = realtime.subscribe(() => this.load(), null, {
+    this._stopRealtime = realtime.subscribe(() => this.load({ background: true }), null, {
       collections: ["devices", "medicines", "vitals", "commands", "today_plans"],
       intervalMs: 20000,
       immediate: false,
@@ -607,7 +603,7 @@ Page({
     }
   },
 
-  async load() {
+  async load(options = {}) {
     const app = getApp();
     const requestDeviceId = String((app && app.globalData && app.globalData.deviceId) || "").trim();
     const deviceSessionState = app && app.globalData && app.globalData.deviceSession || {};
@@ -910,7 +906,9 @@ Page({
       this.setData(nextData);
     } catch (error) {
       if (loadRequestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
-      console.warn("home care read failed", error);
+      if (options.background !== true) {
+        console.warn("home care read failed", error);
+      }
       const sameDeviceSnapshot = this._hasLoadedSnapshot
         && String(this.data.deviceId || "").trim() === requestDeviceId;
       if (!sameDeviceSnapshot) {
@@ -923,6 +921,7 @@ Page({
           carePage: homeCarePage(Object.assign({}, this.data, { stale })),
         });
       }
+      if (options.background === true) throw error;
     }
   },
 

@@ -1,6 +1,6 @@
 <view class="care-screen">
   <app-header
-    title="{{model.title}}"
+    title="{{model.title || '智药康护'}}"
     eyebrow=""
     online="{{model.online}}"
     show-status="{{model.showStatus}}"
@@ -12,7 +12,7 @@
     <view class="care-phase__message">{{model.phase.message}}</view>
     <button
       wx:if="{{model.phase.action}}"
-      class="care-primary care-primary--phase"
+      class="care-primary care-primary--phase {{model.phase.action.disabled ? 'is-disabled' : ''}}"
       disabled="{{model.phase.action.disabled}}"
       bindtap="onPhaseAction"
       hover-class="care-pressed"
@@ -49,8 +49,8 @@
         aria-label="{{model.focus.progress.ariaLabel}}"
       >
         <view class="care-focus__progress-copy">
-          <text>{{model.focus.progress.label}}</text>
-          <text>{{model.focus.progress.current}} / {{model.focus.progress.total}}</text>
+          <text class="care-focus__progress-label">{{model.focus.progress.label}}</text>
+          <text class="care-focus__progress-count">{{model.focus.progress.current}} / {{model.focus.progress.total}}</text>
         </view>
         <view class="care-focus__progress-track">
           <view class="care-focus__progress-value" style="width: {{model.focus.progress.percent}}%;"></view>
@@ -58,7 +58,7 @@
       </view>
       <button
         wx:if="{{model.focus.action && model.focus.activation === 'button'}}"
-        class="care-primary"
+        class="care-primary {{model.focus.action.disabled ? 'is-disabled' : ''}}"
         disabled="{{model.focus.action.disabled}}"
         bindtap="onFocusAction"
         hover-class="care-pressed"
@@ -81,7 +81,7 @@
         hover-class="{{item.action ? 'care-pressed' : ''}}"
         hover-stay-time="80"
       >
-        <view class="care-fact__value">{{item.value}}<text wx:if="{{item.unit}}">{{item.unit}}</text></view>
+        <view class="care-fact__value">{{item.value}}<text wx:if="{{item.unit}}" class="care-fact__unit">{{item.unit}}</text></view>
         <view class="care-fact__label">{{item.label}}</view>
         <view wx:if="{{item.action}}" class="care-fact__arrow">›</view>
       </view>

@@ -23,6 +23,9 @@ function loadVitalsPage(apiOverrides, context = {}) {
     },
     require(modulePath) {
       if (modulePath.includes("realtime")) return context.realtime || { subscribe: () => () => {} };
+      if (modulePath.includes("utils/dateTime")) {
+        return require(path.join(__dirname, "../miniprogram/utils/dateTime"));
+      }
       if (modulePath.includes("utils/deviceSession")) {
         return context.deviceSession || { runAfterDeviceSessionReady: callback => callback() };
       }

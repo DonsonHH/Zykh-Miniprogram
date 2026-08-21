@@ -13,7 +13,7 @@
   border-radius: 18rpx;
 }
 
-.app-header.is-compact .app-header__brand-mark image {
+.app-header.is-compact .app-header__brand-image {
   width: 58rpx;
   height: 58rpx;
 }
@@ -60,7 +60,7 @@
   background: #eaf2ff;
 }
 
-.app-header__brand-mark image {
+.app-header__brand-image {
   width: 62rpx;
   height: 62rpx;
 }
@@ -69,15 +69,15 @@
   min-width: 0;
 }
 
-.app-header__brand-copy text,
-.app-header__brand-copy label {
+.app-header__brand-title,
+.app-header__brand-eyebrow {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.app-header__brand-copy text {
+.app-header__brand-title {
   color: #172033;
   font-size: 30rpx;
   font-weight: 900;
@@ -85,7 +85,7 @@
   line-height: 1.12;
 }
 
-.app-header__brand-copy label {
+.app-header__brand-eyebrow {
   margin-top: 6rpx;
   color: #637083;
   font-size: 24rpx;
@@ -122,8 +122,8 @@
   background: #0f9f8f;
 }
 
-.app-header__status-copy text,
-.app-header__status-copy label {
+.app-header__status-title,
+.app-header__status-hint {
   display: block;
   max-width: 170rpx;
   overflow: hidden;
@@ -132,18 +132,18 @@
   white-space: nowrap;
 }
 
-.app-header__status-copy text {
+.app-header__status-title {
   color: #8a4708;
   font-size: 24rpx;
   font-weight: 800;
   line-height: 1.1;
 }
 
-.is-online .app-header__status-copy text {
+.is-online .app-header__status-title {
   color: #087c68;
 }
 
-.app-header__status-copy label {
+.app-header__status-hint {
   margin-top: 4rpx;
   color: #637083;
   font-size: 24rpx;

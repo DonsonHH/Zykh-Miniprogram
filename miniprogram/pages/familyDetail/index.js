@@ -7,6 +7,7 @@ const medicationSafetyEvents = require("../../modules/medicationSafetyEvents");
 const vitalsAttribution = require("../../modules/vitalsAttribution");
 const personaVisibility = require("../../modules/personaVisibility");
 const { mergeCapabilitySnapshots } = require("../../modules/capabilitySnapshot");
+const { parseTimestamp } = require("../../utils/dateTime");
 
 const medicationSafetyEventModule = medicationSafetyEvents.createMedicationSafetyEventModule(api);
 
@@ -24,7 +25,7 @@ function text(value, fallback = "") {
 }
 
 function timeValue(value) {
-  return Date.parse(String(value || "").replace(/-/g, "/")) || 0;
+  return parseTimestamp(value) || 0;
 }
 
 function timeLabel(value) {

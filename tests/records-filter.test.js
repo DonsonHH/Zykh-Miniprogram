@@ -32,6 +32,9 @@ function loadRecordsPage(apiOverrides = {}, context = {}) {
     require(modulePath) {
       if (modulePath.includes("utils/api")) return api;
       if (modulePath.includes("utils/realtime")) return context.realtime || { subscribe: () => () => {} };
+      if (modulePath.includes("utils/dateTime")) {
+        return require(path.join(__dirname, "../miniprogram/utils/dateTime"));
+      }
       if (modulePath.includes("utils/deviceSession")) {
         return context.deviceSession || { runAfterDeviceSessionReady: callback => callback() };
       }

@@ -31,6 +31,9 @@ function loadInquiryPage(api, wx = {}, app = { globalData: { deviceId: "station-
       definition = page;
     },
     require(modulePath) {
+      if (modulePath.includes("utils/dateTime")) {
+        return require(path.join(__dirname, "../miniprogram/utils/dateTime"));
+      }
       if (modulePath.includes("utils/carePage")) {
         return require(path.join(__dirname, "../miniprogram/utils/carePage"));
       }
@@ -67,6 +70,9 @@ function loadInquiryHistoryPage(api, app = { globalData: { deviceId: "station-de
       definition = page;
     },
     require(modulePath) {
+      if (modulePath.includes("utils/dateTime")) {
+        return require(path.join(__dirname, "../miniprogram/utils/dateTime"));
+      }
       if (modulePath.includes("utils/carePage")) {
         return require(path.join(__dirname, "../miniprogram/utils/carePage"));
       }

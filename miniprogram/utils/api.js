@@ -3,6 +3,7 @@ const { CABINET_SLOT_COUNT } = require("./cabinetSlots");
 const { storageBoxFor } = require("./medicineLibrary");
 const { enrichKnownMedicine, knownMedicineFor } = require("../data/fixedMedicineCatalog");
 const { validateMedicationSafetyEventReadReceipt } = require("../modules/medicationSafetyEvents");
+const { parseTimestamp } = require("./dateTime");
 
 const COLLECTIONS = {
   devices: "devices",
@@ -94,10 +95,7 @@ function emptyDevice(deviceIdOverride = "") {
 }
 
 function parseTime(value) {
-  if (!value) return null;
-  const text = String(value).replace(/-/g, "/");
-  const time = new Date(text).getTime();
-  return Number.isFinite(time) ? time : null;
+  return parseTimestamp(value);
 }
 
 function isDeviceOnline(device) {

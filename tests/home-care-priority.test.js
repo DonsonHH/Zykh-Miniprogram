@@ -66,6 +66,9 @@ function loadHomePage(snapshot, vitals = [], wx = {}, medicines = [], expirySumm
       if (modulePath.includes("utils/realtime")) {
         return apiOverrides.realtime || { subscribe: () => () => {} };
       }
+      if (modulePath.includes("utils/dateTime")) {
+        return require("../miniprogram/utils/dateTime");
+      }
       if (modulePath.includes("utils/deviceSession")) {
         return {
           runAfterDeviceSessionReady(callback) {
