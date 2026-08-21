@@ -143,7 +143,7 @@ test("a medicine without an explicit board inventory state remains unknown", () 
   assert.equal(medicine.stock, undefined);
 });
 
-test("known 23-medicine rows use the current canonical box despite an old cloud box value", () => {
+test("known 22-medicine rows use the current canonical box despite an old cloud box value", () => {
   const medicine = normalizeMedicine({
     deviceId: "station-001",
     name: "阿莫西林胶囊",
@@ -162,7 +162,7 @@ test("a category is not silently presented or submitted as a package specificati
   const medicine = normalizeMedicine({
     deviceId: "station-001",
     slot: 3,
-    category: "cold-medicine",
+    category: "digestive-medicine",
   });
   const { payload } = buildMedicineCommandPayload({
     deviceId: "station-001",

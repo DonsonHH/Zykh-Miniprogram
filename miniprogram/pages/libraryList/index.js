@@ -7,7 +7,6 @@ const {
   summarizeMedicineLibrary,
 } = require("../../utils/medicineLibrary");
 const { FIXED_MEDICINES } = require("../../data/fixedMedicineCatalog");
-const { COLD_STORAGE } = require("../../utils/medicineLibrary");
 
 function medicinesForDisplay(medicines = []) {
   if (Array.isArray(medicines) && medicines.length) return medicines;
@@ -33,7 +32,7 @@ function clearedScope(deviceId = "") {
     device: {},
     medicines: [],
     viewMedicines: [],
-    boxes: [{ id: "ALL", shortLabel: "全部" }].concat(STORAGE_BOXES, COLD_STORAGE),
+    boxes: [{ id: "ALL", shortLabel: "全部" }].concat(STORAGE_BOXES),
     box: "ALL",
     filter: "all",
     keyword: "",
@@ -52,7 +51,7 @@ Page({
   data: clearedScope(""),
 
   onLoad(options = {}) {
-    const box = STORAGE_BOXES.concat(COLD_STORAGE).some(item => item.id === options.box) ? options.box : "ALL";
+    const box = STORAGE_BOXES.some(item => item.id === options.box) ? options.box : "ALL";
     const filter = ["all", "attention", "expiring", "expired", "depleted", "unknown"].includes(options.filter)
       ? options.filter
       : "all";

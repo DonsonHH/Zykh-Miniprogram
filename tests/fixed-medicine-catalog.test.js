@@ -18,7 +18,6 @@ const EXPECTED_NAMES = [
   "乳果糖口服液",
   "银黄颗粒",
   "藿香正气丸",
-  "双歧杆菌三联活菌肠溶胶囊",
   "医用纱布敷料",
   "桂林西瓜霜",
   "铝碳酸镁咀嚼片",
@@ -35,15 +34,15 @@ const EXPECTED_NAMES = [
   "枸地氯雷他定胶囊",
 ];
 
-test("fixed catalog contains the exact current 23 medicines once", () => {
-  assert.equal(FIXED_MEDICINES.length, 23);
+test("fixed catalog contains the exact current 22 medicines once", () => {
+  assert.equal(FIXED_MEDICINES.length, 22);
   assert.deepEqual(FIXED_MEDICINES.map(item => item.name), EXPECTED_NAMES);
-  assert.equal(new Set(FIXED_MEDICINES.map(item => item.medicineId)).size, 23);
-  assert.equal(new Set(FIXED_MEDICINES.map(item => item.legacySlot)).size, 23);
+  assert.equal(new Set(FIXED_MEDICINES.map(item => item.medicineId)).size, 22);
+  assert.equal(new Set(FIXED_MEDICINES.map(item => item.legacySlot)).size, 22);
   assert.ok(FIXED_MEDICINES.every(item => item.manufacturer && item.category && item.safetyNote));
 });
 
-test("the 23 known medicines form the 9-8-5 ordinary-box baseline plus one cold-storage medicine", () => {
+test("the 22 known medicines form the 9-8-5 three-box baseline", () => {
   const summary = summarizeMedicineLibrary(FIXED_MEDICINES.map(item => ({
     medicineId: item.medicineId,
     name: item.name,
@@ -52,8 +51,9 @@ test("the 23 known medicines form the 9-8-5 ordinary-box baseline plus one cold-
   })));
   const counts = Object.fromEntries(summary.boxes.map(box => [box.id, box.count]));
   assert.deepEqual(counts, { DAILY: 9, CARE: 8, PRESCRIPTION: 5 });
-  assert.equal(summary.medicineCount, 23);
-  assert.equal(summary.coldStorageCount, 1);
+  assert.equal(summary.medicineCount, 22);
+  assert.equal(summary.cabinetCount, 3);
+  assert.equal(summary.cabinetMedicineCount, 22);
   assert.deepEqual(
     summary.boxes.find(box => box.id === "DAILY").medicines.map(item => item.name),
     [
@@ -97,7 +97,7 @@ test("catalog enrichment fills static reference data without replacing live fact
   assert.match(enriched.safetyNote, /过敏史和医嘱/);
 });
 
-test("the active medicine library overlays cloud facts onto all 23 canonical medicines", () => {
+test("the active medicine library overlays cloud facts onto all 22 canonical medicines", () => {
   const merged = mergeFixedMedicineBaseline([{
     _id: "random-cloud-document",
     name: "阿莫西林胶囊",
@@ -107,7 +107,7 @@ test("the active medicine library overlays cloud facts onto all 23 canonical med
     spec: "0.25g×24粒",
   }]);
 
-  assert.equal(merged.length, 23);
+  assert.equal(merged.length, 22);
   const amoxicillin = merged.find(item => item.medicineId === "slot-04-amoxicillin");
   assert.equal(amoxicillin.storageBox, "PRESCRIPTION");
   assert.equal(amoxicillin.inventoryState, "STOCKED");
@@ -117,14 +117,16 @@ test("the active medicine library overlays cloud facts onto all 23 canonical med
   assert.equal(merged.find(item => item.medicineId === "slot-21-amlodipine").hasCloudRecord, false);
 });
 
-test("unknown cloud rows do not inflate the current 23-medicine family catalog", () => {
+test("unknown and retired cloud rows do not inflate the current 22-medicine family catalog", () => {
   const merged = mergeFixedMedicineBaseline([
     { name: "阿莫西林胶囊", quantity: 2 },
+    { medicineId: "slot-09-bifid-triple", slot: 9, name: "历史移除药品", quantity: 1 },
     { _id: "old-extra-row-1", name: "历史测试药品A", quantity: 9 },
     { _id: "old-extra-row-2", name: "历史测试药品B", quantity: 9 },
   ]);
 
-  assert.equal(merged.length, 23);
+  assert.equal(merged.length, 22);
+  assert.equal(merged.some(item => item.medicineId === "slot-09-bifid-triple"), false);
   assert.equal(merged.some(item => /历史测试药品/.test(item.name)), false);
   assert.equal(merged.find(item => item.medicineId === "slot-04-amoxicillin").hasCloudRecord, true);
 });

@@ -62,8 +62,8 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
       eyebrow: stale ? "数据待刷新" : "家庭药库",
       title: "三类药品已整理",
       supporting: catalogOnly
-          ? `普通药柜 ${summary.cabinetMedicineCount || 0} 种，另有 ${summary.coldStorageCount || 0} 种冷藏药品。`
-          : `普通药柜 ${summary.cabinetMedicineCount || 0} 种，冷藏药品 ${summary.coldStorageCount || 0} 种；库存和有效期已同步。`,
+          ? `共 ${summary.medicineCount || 0} 种药品，等待终端同步库存和有效期。`
+          : `共 ${summary.medicineCount || 0} 种药品，库存和有效期已同步。`,
         state: { kind: stale ? "pending" : (catalogOnly ? "muted" : "normal"), label: stale ? "待刷新" : (catalogOnly ? "待同步" : "已同步") },
         action: { id: "library.all.focus", label: "查看全部药品" },
         activation: "surface",
@@ -84,8 +84,8 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
     focus,
     overview: [
       { key: "library-total", label: "全部药品", value: summary.medicineCount || 0, state: summary.medicineCount ? "actionable" : "muted" },
-      { key: "library-cabinet-total", label: "普通药柜", value: summary.cabinetMedicineCount || 0, state: summary.cabinetMedicineCount ? "normal" : "muted" },
-      { key: "library-cold-total", label: "冷藏药品", value: summary.coldStorageCount || 0, state: summary.coldStorageCount ? "actionable" : "muted" },
+      { key: "library-cabinet-total", label: "药柜数量", value: summary.cabinetCount || 0, state: summary.cabinetCount ? "normal" : "muted" },
+      { key: "library-attention-total", label: "待处理", value: attentionCount, state: attentionCount ? "pending" : "muted" },
       { key: "library-depleted", label: "待补药", value: summary.depletedCount || 0, state: summary.depletedCount ? "pending" : "muted" },
     ],
     sections: [
@@ -107,26 +107,6 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
             payload: { box: box.id },
           },
         })),
-      },
-      {
-        key: "library-cold-storage",
-        intent: "inventory",
-        title: "冷藏存放",
-        supporting: "贝飞达等需冷藏药品不放入普通药柜",
-        empty: "当前没有登记冷藏药品。",
-        items: summary.coldStorageCount ? [{
-          key: "library-cold-medicines",
-          symbolText: "冷",
-          title: "冷藏药品",
-          supporting: (summary.coldMedicines || []).map(item => item.name).join("、") || "冷藏药品",
-          meta: `冰箱冷藏 · ${summary.coldStorageCount} 种`,
-          state: { kind: "normal", label: "需冷藏" },
-          action: {
-            id: "library.box.COLD",
-            label: "查看冷藏药品",
-            payload: { box: "COLD" },
-          },
-        }] : [],
       },
       {
         key: "library-attention",

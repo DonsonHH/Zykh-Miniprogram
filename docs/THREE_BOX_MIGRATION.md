@@ -17,7 +17,7 @@ CloudBase api 云函数
 
 小程序不再提供仓位编辑、开柜、舵机控制或自动出药。药品扫描入库以 Station 本地数据库为事实源。
 
-## 2. 三个普通药柜与冷藏药品
+## 2. 三个药柜
 
 | `storageBox` | 界面名称 | 内容 |
 | --- | --- | --- |
@@ -25,20 +25,17 @@ CloudBase api 云函数
 | `CARE` | 外用消毒护理 | 消毒、伤口、皮肤、鼻部与局部疼痛 |
 | `PRESCRIPTION` | 慢病处方储备 | 慢病、处方、固定用药与低频储备 |
 
-双歧杆菌三联活菌肠溶胶囊使用 `COLD` 标识，存放在冰箱，不计入三个普通药柜。
-
-旧 23 仓数据的一次性默认映射如下：
+旧仓位数据的一次性默认映射如下：
 
 | 新药盒 | 旧仓号 |
 | --- | --- |
 | 日常高频内服 | 1、3、5、7、8、11、12、13、23 |
 | 外用消毒护理 | 10、15、16、17、18、19、20、22 |
 | 慢病处方储备 | 2、4、6、14、21 |
-| 冷藏药品 | 9 |
 
-该映射只用于迁移现有 23 条记录。迁移后必须把结果写入 `storage_box`，不得继续按旧仓号决定药品位置。
+该映射只用于迁移当前保留的 22 条药品记录。迁移后必须把结果写入 `storage_box`，不得继续按旧仓号决定药品位置。
 
-23 种药品的准确名称、厂家和盒内顺序见 [FIXED_23_MEDICINES.md](FIXED_23_MEDICINES.md)。
+22 种药品的准确名称、厂家和柜内顺序见 [FIXED_22_MEDICINES.md](FIXED_22_MEDICINES.md)。
 
 ## 3. Station 数据库迁移
 
@@ -46,7 +43,7 @@ CloudBase api 云函数
 
 ```text
 medicine_id       TEXT NOT NULL   稳定药品记录 ID
-storage_box       TEXT NOT NULL   DAILY / CARE / PRESCRIPTION / COLD
+storage_box       TEXT NOT NULL   DAILY / CARE / PRESCRIPTION
 trace_code        TEXT            溯源码
 inventory_state   TEXT            STOCKED / DEPLETED / UNKNOWN
 expire_date       TEXT            YYYY-MM 或 YYYY-MM-DD
@@ -133,7 +130,7 @@ AI 给出药品建议前，Station 应结合当前人物档案和药库信息完
 3. 完成本地数据库迁移并上传一次完整药品快照。
 4. 备份并清理该设备旧版随机 ID 药品文档；云函数只会自动回收由 `zykh_station_app` 标记为同步所有者的旧快照。
 5. 在云数据库确认同一设备每个 `medicineId` 只有一条药品文档。
-6. 打开小程序“药库”，确认日常高频内服 9 种、外用消毒护理 8 种、慢病处方储备 5 种，冷藏药品 1 种。
+6. 打开小程序“药库”，确认日常高频内服 9 种、外用消毒护理 8 种、慢病处方储备 5 种，总数为 22 种。
 7. 修改一条药品有效期并重新上传，确认小程序在下一次实时刷新后更新。
 8. 上传一条 `DEPLETED` 药品，确认出现补药提示；上传 `UNKNOWN`，确认只显示余量待确认。
 9. 上传一条 `BLOCKED + NOT_APPLICABLE` 风险事件，确认“用药风险”页按人物和药品展示。

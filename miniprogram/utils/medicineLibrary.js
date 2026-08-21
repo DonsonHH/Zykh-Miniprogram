@@ -29,20 +29,12 @@ const STORAGE_BOXES = Object.freeze([
   }),
 ]);
 
-const COLD_STORAGE = Object.freeze({
-  id: "COLD",
-  label: "冷藏药品",
-  shortLabel: "冷藏",
-  symbol: "冷",
-  description: "需放入冰箱冷藏，不占用三个普通药柜",
-});
-
-const STORAGE_BOX_BY_ID = Object.freeze(STORAGE_BOXES.concat(COLD_STORAGE).reduce((result, box) => {
+const STORAGE_BOX_BY_ID = Object.freeze(STORAGE_BOXES.reduce((result, box) => {
   result[box.id] = box;
   return result;
 }, {}));
 
-const STORAGE_LOCATION_ORDER = ["DAILY", "CARE", "PRESCRIPTION", "COLD"];
+const STORAGE_LOCATION_ORDER = ["DAILY", "CARE", "PRESCRIPTION"];
 
 const LEGACY_SLOT_BOX = Object.freeze({
   1: "DAILY",
@@ -67,7 +59,6 @@ const LEGACY_SLOT_BOX = Object.freeze({
   6: "PRESCRIPTION",
   14: "PRESCRIPTION",
   21: "PRESCRIPTION",
-  9: "COLD",
 });
 
 const CARE_KEYWORDS = [
@@ -150,9 +141,6 @@ function explicitStorageBox(value) {
     "外用": "CARE",
     "外用护理": "CARE",
     "外用与护理": "CARE",
-    COLD: "COLD",
-    "冷藏": "COLD",
-    "冷藏药品": "COLD",
   };
   return aliases[normalized] || "";
 }
@@ -308,15 +296,12 @@ function summarizeMedicineLibrary(rawMedicines = [], options = {}) {
     });
   });
   const available = medicines.filter(item => !item.isDepleted);
-  const coldMedicines = medicines.filter(item => item.storageBox === COLD_STORAGE.id);
   return {
     medicines,
     boxes,
-    coldMedicines,
-    coldStorage: COLD_STORAGE,
     medicineCount: medicines.length,
-    cabinetMedicineCount: medicines.length - coldMedicines.length,
-    coldStorageCount: coldMedicines.length,
+    cabinetCount: boxes.length,
+    cabinetMedicineCount: medicines.length,
     stockedCount: medicines.filter(item => item.isStocked).length,
     depletedCount: medicines.filter(item => item.isDepleted).length,
     inventoryUnknownCount: medicines.filter(item => item.isInventoryUnknown).length,
@@ -355,7 +340,6 @@ function filterMedicines(medicines = [], options = {}) {
 }
 
 module.exports = {
-  COLD_STORAGE,
   STORAGE_BOXES,
   decorateMedicine,
   explicitStorageBox,

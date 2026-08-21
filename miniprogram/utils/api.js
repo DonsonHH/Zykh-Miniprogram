@@ -340,7 +340,7 @@ function normalizeMedicine(item) {
     raw.depletion_confirmation_source,
     "",
   );
-  // The fixed 23-medicine baseline owns the current three-box classification.
+  // The fixed 22-medicine baseline owns the current three-box classification.
   // Live cloud fields still own stock, expiry, specification and trace data.
   const fixedReference = known.fixedCatalogMatch ? knownMedicineFor(raw) : null;
   const box = fixedReference

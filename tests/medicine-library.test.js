@@ -13,13 +13,12 @@ test("canonical medicine classification wins over an obsolete cloud box value", 
   assert.equal(storageBoxId({ name: "任意药品", box_type: "2" }), "CARE");
 });
 
-test("the former 23 medicines are deterministically grouped into three ordinary boxes and cold storage", () => {
+test("the current 22 medicines are deterministically grouped into three boxes", () => {
   assert.equal(storageBoxId({ slot: 2, name: "多维元素片" }), "PRESCRIPTION");
   assert.equal(storageBoxId({ slot: 4, name: "阿莫西林胶囊" }), "PRESCRIPTION");
   assert.equal(storageBoxId({ slot: 8, name: "藿香正气丸" }), "DAILY");
   assert.equal(storageBoxId({ slot: 12, name: "铝碳酸镁咀嚼片" }), "DAILY");
   assert.equal(storageBoxId({ slot: 1, name: "复方感冒灵颗粒" }), "DAILY");
-  assert.equal(storageBoxId({ slot: 9, name: "双歧杆菌三联活菌肠溶胶囊" }), "COLD");
   assert.equal(storageBoxId({ slot: 20, name: "创口贴" }), "CARE");
 });
 

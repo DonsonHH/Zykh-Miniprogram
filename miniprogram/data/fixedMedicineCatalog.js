@@ -1,4 +1,4 @@
-const FIXED_MEDICINE_REFERENCE_VERSION = "home-real-cabinet-v5-balanced-three-box";
+const FIXED_MEDICINE_REFERENCE_VERSION = "home-real-cabinet-v6-three-box-22";
 
 const FIXED_MEDICINES = Object.freeze([
   {
@@ -118,21 +118,6 @@ const FIXED_MEDICINES = Object.freeze([
     tags: ["暑湿不适", "腹胀呕吐"],
     contraindications: ["风热感冒不适用", "孕妇及严重慢病患者需医师指导"],
     safetyNote: "适用暑湿相关不适，胸闷心悸或吐泻明显需就医。",
-    unit: "盒",
-    isOtc: true,
-  },
-  {
-    medicineId: "slot-09-bifid-triple",
-    legacySlot: 9,
-    barcode: "6922313021210",
-    manufacturer: "贝飞达",
-    name: "双歧杆菌三联活菌肠溶胶囊",
-    category: "肠胃",
-    storageBox: "COLD",
-    displayOrder: 4,
-    tags: ["菌群调节", "腹泻便秘"],
-    contraindications: ["对本品过敏禁用", "避免与抗菌药同时服用"],
-    safetyNote: "活菌制剂注意储存条件，和抗菌药需错开。",
     unit: "盒",
     isOtc: true,
   },
@@ -427,7 +412,7 @@ function mergeFixedMedicineBaseline(rawMedicines = []) {
 
   (Array.isArray(rawMedicines) ? rawMedicines : []).forEach(medicine => {
     const known = knownMedicineFor(medicine);
-    // The current product baseline is intentionally limited to these 23
+    // The current product baseline is intentionally limited to these 22
     // medicines. Unknown legacy rows remain in cloud storage for audit, but
     // they must not become extra medicines in the family-facing UI.
     if (!known) return;

@@ -328,9 +328,13 @@ test("three-box library ships a compact overview and a dedicated full list", () 
   assert.match(overviewLogic, /detailAction:\s*summary\.medicineCount/);
   assert.match(overviewLogic, /id:\s*"library\.all"/);
   assert.match(overviewLogic, /id:\s*"library\.attention"/);
+  assert.match(overviewLogic, /key:\s*"library-cabinet-total",\s*label:\s*"药柜数量",\s*value:\s*summary\.cabinetCount/);
+  assert.match(overviewLogic, /key:\s*"library-attention-total",\s*label:\s*"待处理"/);
   assert.match(overviewLogic, /includeFixedBaseline:\s*hasLiveMedicines/);
   assert.match(listLogic, /includeFixedBaseline:\s*hasLiveMedicines/);
   assert.doesNotMatch(`${overview}\n${overviewLogic}`, /OPEN_CABINET|DISPENSE|23\s*仓/);
+  const retiredStoragePattern = new RegExp(`\\u51b7\\u85cf|\\b${"CO" + "LD"}\\b`);
+  assert.doesNotMatch(`${overview}\n${overviewLogic}\n${list}\n${listLogic}`, retiredStoragePattern);
   assert.doesNotMatch(`${overview}\n${overviewLogic}\n${list}\n${listLogic}`, /模拟|示例药品/);
   assert.match(list, /wx:for="\{\{viewMedicines\}\}"/);
   assert.match(list, /storageBoxLabel/);

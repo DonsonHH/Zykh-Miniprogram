@@ -575,13 +575,13 @@ test("an expired medicine is promoted ahead of a routine reminder", async () => 
 
 test("the hero follows the highest care todo instead of an otherwise normal expiry summary", async () => {
   const page = loadHomePage({
-    plans: [{ id: "routine", time: "09:00", medicine: "Routine medicine", status: "pending", due_today: true }],
+    plans: [{ id: "routine", time: "00:00", medicine: "Routine medicine", status: "pending", due_today: true }],
     inquiries: [],
   });
 
   await page.load();
 
-  assert.equal(page.data.focusTitle, "09:00 待提醒");
+  assert.equal(page.data.focusTitle, "00:00 待提醒");
   assert.equal(page.data.heroLevel, "attention");
   assert.equal(page.data.heroBadge, "待提醒");
   assert.equal(page.data.carePage.focus.action.id, "home.focus.plans");
