@@ -128,6 +128,7 @@ test("device-summary fallback inquiries use the same compact process adapter", a
         if (data.action === "GET_DEVICE") {
           return {
             result: {
+              deviceId: "station-summary-fallback",
               syncSummary: {
                 recentInquiries: [{
                   inquiry_id: "fallback-inquiry",

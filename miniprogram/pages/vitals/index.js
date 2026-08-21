@@ -1,7 +1,13 @@
 const api = require("../../utils/api");
 const realtime = require("../../utils/realtime");
-const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
-const { runAfterDeviceSessionReady } = require("../../utils/deviceSession");
+const {
+  composeCarePage,
+  deviceAccessCarePage,
+  loadingCarePage,
+  personaMigrationCarePage,
+} = require("../../utils/carePage");
+const deviceSession = require("../../utils/deviceSession");
+const { connectionCopy } = require("../../utils/connectionState");
 const vitalsAttribution = require("../../modules/vitalsAttribution");
 const { parseTimestamp } = require("../../utils/dateTime");
 
@@ -254,8 +260,10 @@ function composeVitalsCarePage(
       supporting: `最近请求：${vitalsView.commandStatusLabel}`,
       meta: vitals ? `${vitalsView.timeLabel} · ${vitalsView.personName}` : "等待首次测量",
       state: {
-        kind: device && device.online ? "normal" : "pending",
-        label: device && device.online ? "在线" : "离线",
+        kind: device && device.online ? "normal" : "muted",
+        label: device && device.connection
+          ? connectionCopy(device.connection).title
+          : "状态待确认",
       },
       action: {
         id: "vitals.details",
@@ -268,6 +276,7 @@ function composeVitalsCarePage(
     key: "vitals",
     title: "健康测量",
     online: Boolean(device && device.online),
+    connection: device && device.connection,
     focus: {
       eyebrow: "最近一次测量",
       title: focusTitle,
@@ -296,6 +305,7 @@ function vitalsErrorCarePage(device) {
     key: "vitals-error",
     title: "健康测量",
     online: Boolean(device && device.online),
+    connection: device && device.connection,
     phase: {
       kind: "error",
       message: "测量数据读取失败，请检查网络后重新加载。",
@@ -321,7 +331,11 @@ function measurementDetailRows(device, vitals, command, attribution = {}, capabi
         "暂无",
       ),
     },
-    { key: "device", label: "药箱状态", value: device && device.online ? "在线" : "离线" },
+    {
+      key: "device",
+      label: "药箱状态",
+      value: device && device.connection ? connectionCopy(device.connection).title : "状态待确认",
+    },
   ];
   if (attribution.kind === "BROKEN_INQUIRY") {
     const capabilities = capabilitySnapshot.capabilities || {};
@@ -346,7 +360,7 @@ function emptyVitalsView() {
     personName: "未登记人员",
     attributionKind: "",
     sensorHint: "等待上传",
-    deviceStatusLabel: "等待药箱连接",
+    deviceStatusLabel: "正在确认药箱状态",
     commandStatusLabel: "暂无测量指令",
     measurementStatusLabel: "暂无数据",
     measurementStatusClass: "muted",
@@ -377,7 +391,7 @@ Page({
   },
 
   onShow() {
-    return runAfterDeviceSessionReady(() => {
+    return deviceSession.runAfterDeviceSessionReady(() => {
       const loading = this.load();
       this.startRealtime();
       return loading;
@@ -437,10 +451,32 @@ Page({
         detailRows: [],
       });
     }
+    if (!requestDeviceId) {
+      this.stopRealtime();
+      this.setData({
+        carePage: deviceAccessCarePage(
+          "健康测量",
+          deviceSession.currentDeviceSession(),
+          { retryAction: { id: "vitals.retry", label: "重新确认药箱状态" } },
+        ),
+      });
+      return;
+    }
     try {
-      const [device, vitals, commandRead, snapshotRead, capabilityRead] = await Promise.all([
-        api.getDevice(requestDeviceId),
-        api.getLatestVitalsStrict(requestDeviceId),
+      const device = await api.getDeviceStrict(requestDeviceId);
+      let vitals;
+      try {
+        vitals = await api.getLatestVitalsStrict(requestDeviceId);
+      } catch (error) {
+        if (!deviceSession.isPersonaMigrationError(error)) throw error;
+        if (loadRequestId !== this._loadRequestId || !this.isDeviceScopeCurrent(requestDeviceId)) return;
+        this.setData({
+          device,
+          carePage: personaMigrationCarePage("健康测量", device.connection),
+        });
+        return;
+      }
+      const [commandRead, snapshotRead, capabilityRead] = await Promise.all([
         api.getRecentCommandsStrict(12, requestDeviceId).then(
           commands => ({ commands, known: true }),
           error => ({ commands: [], known: false, error }),
@@ -496,7 +532,9 @@ Page({
         personName: attribution ? attribution.label : "未登记人员",
         attributionKind: attribution ? attribution.kind : "",
         sensorHint: measurement.hint,
-        deviceStatusLabel: device && device.online ? "药箱在线" : "药箱离线",
+        deviceStatusLabel: device && device.connection
+          ? connectionCopy(device.connection).title
+          : "药箱状态暂不可用",
         commandStatusLabel: commandRead.known
           ? (latestCommand.statusText || (vitals ? "暂无测量指令" : "等待测量"))
           : "请求状态暂不可用",

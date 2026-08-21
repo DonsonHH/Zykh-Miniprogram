@@ -189,7 +189,6 @@ function commandToTimeline(command = {}) {
     AUDIO_SPEAK: "远程用药提醒",
     READ_VITALS_ALL: "远程测量",
     AI_CHAT: "AI 问询提交",
-    UPSERT_MEDICINE: "药品信息同步",
   };
   return {
     id: `command-${command._id || rawTime}`,
@@ -223,7 +222,7 @@ function buildTimeline(inquiries, commands, vitals, safetyEvents, attributionCon
     .concat((vitals || []).map(record => vitalsToTimeline(record, attributionContext)))
     .concat((inquiries || []).map(inquiryToTimeline))
     .concat((commands || [])
-      .filter(command => command.type !== "AI_CHAT" && command.type !== "UPSERT_MEDICINE")
+      .filter(command => command.type !== "AI_CHAT")
       .slice(0, 6)
       .map(commandToTimeline))
     .sort((a, b) => sortValue(b) - sortValue(a))
@@ -310,13 +309,20 @@ function homeCarePage(state = {}) {
   const reminderDose = reminderPlan.dose || reminderPlan.dosage || "";
   const reminderTime = String(reminderPlan.time || "--:--").slice(0, 5);
   const deviceOnline = Boolean(state.device && state.device.online);
+  const connectionState = String(
+    state.device && state.device.connection && state.device.connection.state || "unavailable",
+  );
 
   let focusTitle = "今天暂无用药计划";
   let focusSupporting = "有新的计划或照护记录时会自动更新。";
   let focusState = { kind: "normal", label: "无需提醒" };
   let focusAction = null;
   let focusActivation = "none";
-  if (reminder && reminderKey) {
+  if (state.personaMigrating) {
+    focusTitle = "家人照护资料正在更新";
+    focusSupporting = "用药计划、问询和健康记录完成安全迁移后会自动恢复。";
+    focusState = { kind: "muted", label: "更新中" };
+  } else if (reminder && reminderKey) {
     focusTitle = `${reminderTime} · ${reminderPerson}`;
     focusSupporting = [reminderMedicine, reminderDose].filter(Boolean).join(" · ");
     focusState = { kind: "pending", label: "待提醒" };
@@ -335,10 +341,16 @@ function homeCarePage(state = {}) {
     };
     focusActivation = "surface";
   } else if (!deviceOnline) {
-    focusTitle = "照护信息等待更新";
-    focusSupporting = "家庭药箱重新连接后，今日计划会自动同步。";
-    focusState = { kind: "pending", label: "待连接" };
-    focusAction = { id: "home.focus.connection", label: "打开药箱连接设置" };
+    const connectionCopy = {
+      stale: ["照护信息等待更新", "家庭药箱重新连接后，今日计划会自动同步。", "待连接"],
+      loading: ["正在确认药箱状态", "连接确认完成后会自动显示今日计划。", "确认中"],
+      incompatible: ["云端版本待升级", "当前可继续查看上次同步内容。", "待升级"],
+      unpaired: ["请先配对药箱", "完成家庭药箱授权后即可查看照护计划。", "待配对"],
+      unavailable: ["药箱状态暂不可用", "网络恢复后会自动重新读取照护信息。", "稍后重试"],
+    }[connectionState] || ["药箱状态暂不可用", "请稍后重新读取照护信息。", "待确认"];
+    [focusTitle, focusSupporting] = connectionCopy;
+    focusState = { kind: "pending", label: connectionCopy[2] };
+    focusAction = { id: "home.focus.connection", label: "打开药箱设置" };
     focusActivation = "surface";
   }
 
@@ -410,7 +422,7 @@ function homeCarePage(state = {}) {
         key: "home-health-measurement",
         symbol: "measure",
         title: "健康测量",
-        supporting: state.latestVitalsText,
+        supporting: state.personaMigrating ? "家人健康记录正在更新" : state.latestVitalsText,
         state: { kind: "actionable", label: "查看" },
         action: { id: "home.vitals", label: "查看健康测量" },
       },
@@ -418,7 +430,9 @@ function homeCarePage(state = {}) {
         key: "home-recent-activity",
         symbol: "timeline",
         title: "近期记录",
-        supporting: state.latestCount ? `最近同步 ${state.latestCount} 条照护记录` : "还没有照护记录",
+        supporting: state.personaMigrating
+          ? "照护动态完成更新后会自动显示"
+          : (state.latestCount ? `最近同步 ${state.latestCount} 条照护记录` : "还没有照护记录"),
         state: { kind: "muted", label: state.latestCount ? `${state.latestCount} 条` : "暂无" },
         action: { id: "home.timeline", label: "查看近期记录" },
       },
@@ -433,7 +447,9 @@ function homeCarePage(state = {}) {
         key: "home-inquiry-navigation",
         symbol: "conversation",
         title: "问询摘要",
-        supporting: state.inquiryCount ? `${state.inquiryCount} 条问询结论可查看` : "查看家人的健康问询结论",
+        supporting: state.personaMigrating
+          ? "家人问询资料正在更新"
+          : (state.inquiryCount ? `${state.inquiryCount} 条问询结论可查看` : "查看家人的健康问询结论"),
         state: { kind: "actionable", label: "查看" },
         action: { id: "home.inquiry", label: "打开家庭问询" },
       },
@@ -452,6 +468,7 @@ function homeCarePage(state = {}) {
     key: "home-care",
     title: "家庭照护",
     online: deviceOnline,
+    connection: state.device && state.device.connection,
     focus: {
       eyebrow: "今日照护进度",
       title: focusTitle,
@@ -473,6 +490,7 @@ function homeErrorCarePage(device = {}) {
     key: "home-error",
     title: "家庭照护",
     online: Boolean(device.online),
+    connection: device.connection,
     phase: {
       kind: "error",
       message: "家庭照护信息读取失败，请检查网络后重新加载。",
@@ -484,6 +502,21 @@ function homeErrorCarePage(device = {}) {
 function homeDeviceAccessCarePage(session = {}) {
   const availability = String(session.availability || "").trim();
   const copy = {
+    loading: {
+      title: "正在确认药箱状态",
+      supporting: "正在读取当前账号的药箱授权，请稍候。",
+      state: "确认中",
+    },
+    incompatible: {
+      title: "云端版本待升级",
+      supporting: session.message || "同步服务升级完成后会自动恢复。",
+      state: "待升级",
+    },
+    error: {
+      title: "药箱状态暂不可用",
+      supporting: session.message || "网络恢复后请重新进入页面。",
+      state: "稍后重试",
+    },
     unpaired: {
       title: "请先配对药箱",
       supporting: session.message || "当前微信账号尚未配对药箱，请在家人页输入一次性配对码。",
@@ -647,6 +680,7 @@ Page({
         safetyDeviceId: requestDeviceId,
         riskCount: 0,
         todaySafetyCount: 0,
+        personaMigrating: false,
       });
     }
     if (!requestDeviceId) {
@@ -656,12 +690,26 @@ Page({
       return;
     }
     try {
-      const [device, medicines, commands, snapshot, vitals, safetyState] = await Promise.all([
+      const [device, medicines] = await Promise.all([
         api.getDeviceStrict(requestDeviceId),
         api.getMedicinesStrict(requestDeviceId),
-        api.getRecentCommandsStrict(12, requestDeviceId),
-        api.getSnapshotStrict({ inquiryLimit: 12, deviceId: requestDeviceId }),
-        api.getRecentVitalsStrict(20, requestDeviceId),
+      ]);
+      const [commandRead, snapshotRead, vitalsRead, safetyState] = await Promise.all([
+        api.getRecentCommandsStrict(12, requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: [], error }),
+        ),
+        api.getSnapshotStrict({ inquiryLimit: 12, deviceId: requestDeviceId }).then(
+          value => ({ value, error: null }),
+          error => ({
+            value: { serviceUsers: [], plans: [], inquiries: [], capabilities: {} },
+            error,
+          }),
+        ),
+        api.getRecentVitalsStrict(20, requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: [], error }),
+        ),
         medicationSafetyEventModule.list({
           limit: 100,
           unreadOnly: false,
@@ -669,7 +717,18 @@ Page({
           includeLocalFixtures: true,
         }),
       ]);
+      const commands = commandRead.value;
+      const snapshot = snapshotRead.value;
+      const vitals = vitalsRead.value;
+      const personaMigrating = [commandRead.error, snapshotRead.error, vitalsRead.error]
+        .filter(Boolean)
+        .some(deviceSession.isPersonaMigrationError);
       if (loadRequestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
+
+      const optionalReadError = [commandRead.error, snapshotRead.error, vitalsRead.error]
+        .filter(Boolean)
+        .find(error => !deviceSession.isPersonaMigrationError(error));
+      if (optionalReadError) throw optionalReadError;
 
       const sameDeviceScope = this._hasLoadedSnapshot === true
         && String(this.data.safetyDeviceId || "") === requestDeviceId;
@@ -730,11 +789,7 @@ Page({
       const completedPlans = todayPlans.filter(plan => (
         planStatus.executionStatus(plan) === planStatus.PLAN_STATUS.TAKEN
       ));
-      const hasFixedCatalogSnapshot = Array.isArray(medicines)
-        && medicines.some(item => item && item.fixedCatalogMatch === true);
-      const medicineSummary = medicineLibrary.summarizeMedicineLibrary(medicines || [], {
-        includeFixedBaseline: hasFixedCatalogSnapshot,
-      });
+      const medicineSummary = medicineLibrary.summarizeMedicineLibrary(medicines || []);
       const inventoryMedicines = medicineSummary.medicines;
       const risks = medicineRiskItems(inventoryMedicines.filter(item => !item.isDepleted));
       const depleted = depletedMedicineItems(inventoryMedicines);
@@ -899,6 +954,7 @@ Page({
         todaySafetyCount: safetyProjection.todayBlockedCount,
         unreadRiskCount: safetyOverviewProjection.unreadBlockedCount + safetyOverviewProjection.unreadCheckFailedCount,
         riskCount,
+        personaMigrating,
         stale: transientSafetyFailure,
       };
       nextData.carePage = homeCarePage(nextData);

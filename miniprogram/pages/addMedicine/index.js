@@ -408,78 +408,12 @@ Page({
     });
   },
 
-  async submit() {
-    const requestDeviceId = activeDeviceId();
-    if (String(this.data.deviceId || "").trim() !== requestDeviceId) {
-      this.prepareDeviceScope(requestDeviceId);
-      this.load();
-      wx.showToast({ title: "药箱已切换，正在重新读取", icon: "none" });
-      return;
-    }
-    if (this.data.isStale) {
-      wx.showToast({ title: "数据待刷新，请重新读取后再提交", icon: "none" });
-      return;
-    }
-    if (!this.isEditorReady() || this.data.saving) return;
-    const form = this.data.form;
-    if (!form.name.trim()) {
-      this.setData({ currentStep: 1 });
-      wx.showToast({ title: "请输入药名", icon: "none" });
-      return;
-    }
-    const expireDate = normalizeExpiryDate(form.expireDate);
-    if (!expireDate) {
-      this.setData({ currentStep: 2 });
-      wx.showToast({ title: "请选择有效期", icon: "none" });
-      return;
-    }
-    const quantityText = String(form.quantity === 0 ? "0" : form.quantity || "").trim();
-    const quantity = Number(quantityText);
-    if (!quantityText || !Number.isInteger(quantity) || quantity < 0) {
-      wx.showToast({ title: "库存请填写不小于 0 的整数", icon: "none" });
-      return;
-    }
-    const slot = this.data.slotIndex + 1;
-    const submitRevision = Number(this._submitRevision || 0) + 1;
-    this._submitRevision = submitRevision;
-    this.setData({ saving: true });
-    wx.showLoading({ title: "正在提交", mask: true });
-    try {
-      const inventoryIntent = String(this.data.inventoryIntent || "").trim().toUpperCase();
-      const submittedForm = {
-        slot,
-        name: form.name.trim(),
-        spec: form.spec.trim(),
-        quantity,
-        expireDate,
-        expiryPrecision: form.expiryPrecision,
-      };
-      if (inventoryIntent && this.data.inventoryPolicy.explicitInventoryStateSupported === true) {
-        submittedForm.inventoryState = inventoryIntent;
-      }
-      await api.saveMedicine(submittedForm, this.data.baseMedicine);
-      wx.hideLoading();
-      if (submitRevision !== this._submitRevision || !this.isDeviceScopeCurrent(requestDeviceId)) return;
-      if (inventoryIntent) {
-        this.setData({ inventoryUpdateStatus: "pending" });
-        wx.showToast({
-          title: "已提交，等待药箱确认",
-          icon: "none",
-        });
-        return;
-      }
-      wx.showToast({ title: "已提交，等待药箱同步", icon: "success" });
-      setTimeout(() => wx.switchTab({ url: "/pages/cabinet/index" }), 900);
-    } catch (error) {
-      wx.hideLoading();
-      if (submitRevision !== this._submitRevision || !this.isDeviceScopeCurrent(requestDeviceId)) return;
-      console.warn("medicine command submission failed", error);
-      if (this.data.inventoryIntent) this.setData({ inventoryUpdateStatus: "failed" });
-      wx.showToast({ title: "提交失败，请重试", icon: "none" });
-    } finally {
-      if (submitRevision === this._submitRevision && this.isDeviceScopeCurrent(requestDeviceId)) {
-        this.setData({ saving: false });
-      }
-    }
+  submit() {
+    wx.showModal({
+      title: "请在药箱端录入",
+      content: "药品名称、库存和有效期以药箱现场识别结果为准，小程序仅用于查看同步结果。",
+      showCancel: false,
+      confirmText: "知道了",
+    });
   },
 });

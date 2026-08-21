@@ -231,6 +231,7 @@ function buildRecordsCarePage(state = {}) {
     key: "records-page",
     title: "照护记录",
     online: Boolean(state.device && state.device.online),
+    connection: state.device && state.device.connection,
     focus: {
       eyebrow: "最近一次照护",
       title: focusTitle,
@@ -363,6 +364,7 @@ function recordsErrorCarePage(device) {
     key: "records-error",
     title: "照护记录",
     online: Boolean(device && device.online),
+    connection: device && device.connection,
     phase: {
       kind: "error",
       message: "照护记录读取失败，请检查网络后重新加载。",

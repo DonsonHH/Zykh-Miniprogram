@@ -4,6 +4,7 @@
     eyebrow="家庭药库"
     subtitle="{{viewMedicines.length}} 种药品"
     online="{{device.online}}"
+    connection-state="{{initialLoading ? 'loading' : (device.connectionState || 'unavailable')}}"
     status-text="{{initialLoading ? '正在读取' : ''}}"
     status-hint="{{initialLoading ? '请稍候' : ''}}"
   />

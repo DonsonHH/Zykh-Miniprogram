@@ -11,6 +11,21 @@ function loadVitalsPage(apiOverrides, context = {}) {
   const toasts = [];
   const modals = [];
   const api = Object.assign({}, apiOverrides);
+  const readDevice = api.getDeviceStrict || api.getDevice || (async deviceId => ({ deviceId, online: true }));
+  api.getDeviceStrict = async deviceId => {
+    const device = await readDevice(deviceId);
+    if (device && device.connection) return device;
+    const online = device && device.online === true;
+    return Object.assign({}, device, {
+      heartbeatAgeMs: online ? 0 : 120000,
+      lastSeenAtEpochMs: online ? Date.now() : Date.now() - 120000,
+      connection: {
+        state: online ? "online" : "stale",
+        online,
+        heartbeatAgeMs: online ? 0 : 120000,
+      },
+    });
+  };
   api.getLatestVitalsStrict = api.getLatestVitalsStrict || api.getLatestVitals;
   api.getRecentCommandsStrict = api.getRecentCommandsStrict || api.getRecentCommands;
   api.getSnapshotStrict = api.getSnapshotStrict || (async () => ({ serviceUsers: [] }));
@@ -27,10 +42,18 @@ function loadVitalsPage(apiOverrides, context = {}) {
         return require(path.join(__dirname, "../miniprogram/utils/dateTime"));
       }
       if (modulePath.includes("utils/deviceSession")) {
-        return context.deviceSession || { runAfterDeviceSessionReady: callback => callback() };
+        return Object.assign(
+          {},
+          require(path.join(__dirname, "../miniprogram/utils/deviceSession")),
+          { runAfterDeviceSessionReady: callback => callback() },
+          context.deviceSession || {},
+        );
       }
       if (modulePath.includes("utils/carePage")) {
         return require(path.join(__dirname, "../miniprogram/utils/carePage"));
+      }
+      if (modulePath.includes("utils/connectionState")) {
+        return require(path.join(__dirname, "../miniprogram/utils/connectionState"));
       }
       if (modulePath.includes("modules/vitalsAttribution")) {
         return require(path.join(__dirname, "../miniprogram/modules/vitalsAttribution"));

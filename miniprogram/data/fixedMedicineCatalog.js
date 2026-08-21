@@ -1,4 +1,4 @@
-const FIXED_MEDICINE_REFERENCE_VERSION = "home-real-cabinet-v6-three-box-22";
+const FIXED_MEDICINE_REFERENCE_VERSION = "board-authoritative-v7-three-box-23";
 
 const FIXED_MEDICINES = Object.freeze([
   {
@@ -118,6 +118,21 @@ const FIXED_MEDICINES = Object.freeze([
     tags: ["暑湿不适", "腹胀呕吐"],
     contraindications: ["风热感冒不适用", "孕妇及严重慢病患者需医师指导"],
     safetyNote: "适用暑湿相关不适，胸闷心悸或吐泻明显需就医。",
+    unit: "盒",
+    isOtc: true,
+  },
+  {
+    medicineId: "slot-09-bifid-triple",
+    legacySlot: 9,
+    barcode: "",
+    manufacturer: "上海上药信谊药厂有限公司",
+    name: "双歧杆菌三联活菌肠溶胶囊",
+    category: "肠道微生态",
+    storageBox: "PRESCRIPTION",
+    displayOrder: 4,
+    tags: ["肠道菌群", "需按储存要求保管"],
+    contraindications: ["对本品成分过敏者禁用", "使用前核对包装标注的储存条件"],
+    safetyNote: "按实物说明书和专业指导使用，储存条件以当前包装标注为准。",
     unit: "盒",
     isOtc: true,
   },
@@ -351,23 +366,9 @@ function numericSlot(medicine = {}) {
 
 function knownMedicineFor(medicine = {}) {
   const medicineId = text(medicine.medicineId || medicine.medicine_id || medicine.id || medicine._id);
-  if (medicineId) {
-    const byId = FIXED_MEDICINES.find(item => item.medicineId === medicineId);
-    if (byId) return byId;
-  }
-  const barcode = text(medicine.traceCode || medicine.trace_code || medicine.barcode || medicine.code);
-  if (barcode) {
-    const byBarcode = FIXED_MEDICINES.find(item => item.barcode && item.barcode === barcode);
-    if (byBarcode) return byBarcode;
-  }
-  const name = text(medicine.name);
-  if (name) {
-    const byName = FIXED_MEDICINES.find(item => item.name === name);
-    if (byName) return byName;
-    return null;
-  }
-  const slot = numericSlot(medicine);
-  return slot ? FIXED_MEDICINES.find(item => item.legacySlot === slot) || null : null;
+  return medicineId
+    ? FIXED_MEDICINES.find(item => item.medicineId === medicineId) || null
+    : null;
 }
 
 function firstText(...values) {
@@ -408,35 +409,21 @@ function enrichKnownMedicine(medicine = {}) {
 }
 
 function mergeFixedMedicineBaseline(rawMedicines = []) {
-  const liveByMedicineId = Object.create(null);
-
+  const byIdentity = new Map();
   (Array.isArray(rawMedicines) ? rawMedicines : []).forEach(medicine => {
-    const known = knownMedicineFor(medicine);
-    // The current product baseline is intentionally limited to these 22
-    // medicines. Unknown legacy rows remain in cloud storage for audit, but
-    // they must not become extra medicines in the family-facing UI.
-    if (!known) return;
-    // LIST_MEDICINES is newest-first. Keep one current cloud fact per stable
-    // medicine identity so old random document ids cannot duplicate a drug.
-    if (!liveByMedicineId[known.medicineId]) {
-      liveByMedicineId[known.medicineId] = medicine;
-    }
+    const camelId = text(medicine && medicine.medicineId);
+    const snakeId = text(medicine && medicine.medicine_id);
+    if (!medicine || (camelId && snakeId && camelId !== snakeId)) return;
+    const identity = camelId || snakeId;
+    if (!identity || byIdentity.has(identity)) return;
+    const enriched = enrichKnownMedicine(medicine);
+    byIdentity.set(identity, Object.assign({}, enriched, {
+      medicineId: identity,
+      medicine_id: identity,
+      hasCloudRecord: true,
+    }));
   });
-
-  const fixedMedicines = FIXED_MEDICINES.map(reference => {
-    const live = liveByMedicineId[reference.medicineId] || null;
-    return Object.assign({}, reference, live || {}, {
-      medicineId: reference.medicineId,
-      medicine_id: reference.medicineId,
-      legacySlot: reference.legacySlot,
-      storageBox: reference.storageBox,
-      storage_box: reference.storageBox,
-      fixedCatalogMatch: true,
-      hasCloudRecord: Boolean(live),
-    });
-  });
-
-  return fixedMedicines;
+  return Array.from(byIdentity.values());
 }
 
 module.exports = {

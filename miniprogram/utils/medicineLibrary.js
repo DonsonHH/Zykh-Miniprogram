@@ -8,22 +8,22 @@ const {
 const STORAGE_BOXES = Object.freeze([
   Object.freeze({
     id: "DAILY",
-    label: "日常高频内服",
-    shortLabel: "日常内服",
+    label: "日常用药",
+    shortLabel: "日常用药",
     symbol: "日",
     description: "感冒、发热、咳嗽、过敏与胃肠不适",
   }),
   Object.freeze({
     id: "CARE",
-    label: "外用消毒护理",
+    label: "外用护理",
     shortLabel: "外用护理",
     symbol: "护",
     description: "消毒、伤口、皮肤、鼻部与局部疼痛",
   }),
   Object.freeze({
     id: "PRESCRIPTION",
-    label: "慢病处方储备",
-    shortLabel: "专属储备",
+    label: "慢病处方",
+    shortLabel: "慢病处方",
     symbol: "专",
     description: "慢病、处方、固定用药与低频储备",
   }),
@@ -36,43 +36,6 @@ const STORAGE_BOX_BY_ID = Object.freeze(STORAGE_BOXES.reduce((result, box) => {
 
 const STORAGE_LOCATION_ORDER = ["DAILY", "CARE", "PRESCRIPTION"];
 
-const LEGACY_SLOT_BOX = Object.freeze({
-  1: "DAILY",
-  3: "DAILY",
-  5: "DAILY",
-  7: "DAILY",
-  8: "DAILY",
-  11: "DAILY",
-  12: "DAILY",
-  13: "DAILY",
-  23: "DAILY",
-  10: "CARE",
-  15: "CARE",
-  16: "CARE",
-  17: "CARE",
-  18: "CARE",
-  19: "CARE",
-  20: "CARE",
-  22: "CARE",
-  2: "PRESCRIPTION",
-  4: "PRESCRIPTION",
-  6: "PRESCRIPTION",
-  14: "PRESCRIPTION",
-  21: "PRESCRIPTION",
-});
-
-const CARE_KEYWORDS = [
-  "外用", "乳膏", "软膏", "凝胶", "滴眼", "滴鼻", "喷雾", "消毒", "碘伏",
-  "创口贴", "纱布", "棉签", "敷料", "贴剂", "洗剂",
-];
-const DAILY_KEYWORDS = [
-  "复方感冒灵", "布洛芬", "蜜炼川贝", "银黄", "西瓜霜", "蒙脱石",
-  "铝碳酸镁", "藿香正气", "氯雷他定", "感冒", "咳嗽", "过敏", "胃肠",
-];
-const PRESCRIPTION_KEYWORDS = [
-  "氨氯地平", "奥司他韦", "阿莫西林", "多维元素", "乳果糖", "慢病", "处方", "长期",
-];
-
 function text(value) {
   return String(value === undefined || value === null ? "" : value).replace(/\s+/g, " ").trim();
 }
@@ -83,7 +46,6 @@ function legacySlotFor(medicine = {}) {
 }
 
 function medicineIdentity(medicine = {}) {
-  const known = knownMedicineFor(medicine);
   const direct = text(
     medicine.medicineId
       || medicine.medicine_id
@@ -95,7 +57,6 @@ function medicineIdentity(medicine = {}) {
       || medicine.id,
   );
   if (direct) return direct;
-  if (known) return known.medicineId;
   const legacySlot = legacySlotFor(medicine);
   if (legacySlot) return `legacy-slot-${legacySlot}`;
   return [medicine.name, medicine.spec, medicine.expireDate || medicine.expire_date]
@@ -107,48 +68,22 @@ function medicineIdentity(medicine = {}) {
 function explicitStorageBox(value) {
   const normalized = text(value).toUpperCase();
   const aliases = {
-    "1": "DAILY",
-    BOX1: "DAILY",
     DAILY: "DAILY",
-    ROUTINE: "DAILY",
-    CHRONIC: "PRESCRIPTION",
     "日常": "DAILY",
     "日常用药": "DAILY",
-    "日常口服": "DAILY",
-    "内服": "DAILY",
-    "综合内服": "DAILY",
-    "基础内服": "DAILY",
-    "2": "CARE",
-    BOX2: "CARE",
-    SYMPTOM: "DAILY",
-    PRN: "DAILY",
-    COMMON: "DAILY",
-    "对症": "DAILY",
-    "对症药品": "DAILY",
-    "对症备用": "DAILY",
-    "呼吸": "DAILY",
-    "感冒呼吸": "DAILY",
-    "感冒与呼吸": "DAILY",
-    "3": "PRESCRIPTION",
-    BOX3: "PRESCRIPTION",
     PRESCRIPTION: "PRESCRIPTION",
     "慢病": "PRESCRIPTION",
     "处方": "PRESCRIPTION",
+    "慢病处方": "PRESCRIPTION",
     CARE: "CARE",
-    EXTERNAL: "CARE",
-    TOPICAL: "CARE",
     "护理": "CARE",
     "外用": "CARE",
     "外用护理": "CARE",
-    "外用与护理": "CARE",
   };
   return aliases[normalized] || "";
 }
 
 function storageBoxId(medicine = {}) {
-  const known = knownMedicineFor(medicine);
-  if (known) return known.storageBox;
-
   const explicit = explicitStorageBox(
     medicine.storageBox
       || medicine.storage_box
@@ -158,18 +93,13 @@ function storageBoxId(medicine = {}) {
       || medicine.box_id,
   );
   if (explicit) return explicit;
-
-  const haystack = [medicine.name, medicine.category, medicine.tags].flat().map(text).join(" ");
-  if (CARE_KEYWORDS.some(keyword => haystack.includes(keyword))) return "CARE";
-  if (PRESCRIPTION_KEYWORDS.some(keyword => haystack.includes(keyword))) return "PRESCRIPTION";
-  if (DAILY_KEYWORDS.some(keyword => haystack.includes(keyword))) return "DAILY";
-
-  const legacySlot = legacySlotFor(medicine);
-  return LEGACY_SLOT_BOX[legacySlot] || "DAILY";
+  const medicineId = text(medicine.medicineId || medicine.medicine_id);
+  const known = medicineId ? knownMedicineFor({ medicineId }) : null;
+  return known ? known.storageBox : "";
 }
 
 function storageBoxFor(medicine = {}) {
-  return STORAGE_BOX_BY_ID[storageBoxId(medicine)] || STORAGE_BOX_BY_ID.DAILY;
+  return STORAGE_BOX_BY_ID[storageBoxId(medicine)] || null;
 }
 
 function inventoryView(medicine = {}) {
@@ -223,6 +153,11 @@ function inventoryView(medicine = {}) {
 function decorateMedicine(medicine = {}) {
   const enriched = enrichKnownMedicine(medicine);
   const box = storageBoxFor(enriched);
+  if (!box) {
+    const error = new Error("medicine storage box is invalid");
+    error.code = "MEDICINE_STORAGE_BOX_INVALID";
+    throw error;
+  }
   const expiry = expiryView(enriched);
   const medicineId = medicineIdentity(enriched);
   const legacySlot = legacySlotFor(enriched);

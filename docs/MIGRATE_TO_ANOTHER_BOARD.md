@@ -1,776 +1,237 @@
-# 智药康护小程序与 QSM368 第二块板迁移指南
+# 智药康护第二块 QSM368 迁移手册
 
-> **其中 23 仓、仓位录药和开仓相关步骤已失效。** 迁移当前三盒版本前，必须先执行 [THREE_BOX_MIGRATION.md](THREE_BOX_MIGRATION.md)。本文件其余网络、密钥和 CloudBase 排障内容只可作为补充参考。
+> 适用版本：CloudBase schema revision `3.0-three-box-library`，Release A。本文供另一台电脑上的工程师独立完成迁移。当前仓库未包含 Station 主程序，也不包含任何设备密钥。
 
-> 新版完整交接手册请优先阅读：`docs/SYNC_AND_MIGRATION_GUIDE.md`。该文档补充了“小程序如何通过 CloudBase 与板端同步”、USB relay 临时链路、第二台电脑迁移步骤、验证流程和排障清单。
+## 1. 迁移目标
 
-本文给另一位工程师使用，目标是在另一台电脑、另一块 QSM368ZP-WF 开发板上接入同一个微信小程序和同一个 CloudBase 云环境。
-
-迁移完成后的链路是：
+第二块板接入同一个 CloudBase 和同一个小程序，但拥有独立身份、独立药库和独立心跳：
 
 ```text
-微信小程序
-  -> CloudBase 云函数 /api
-  -> 第二块 QSM368 cloud_agent
-  -> 第二块板子本地 server.pl
-  -> 板子本地 API / SQLite / 硬件脚本
+QSM368 #1 -> zykh-qsm-001 -> 自己的心跳与 23 行药库
+QSM368 #2 -> zykh-qsm-002 -> 自己的心跳与 23 行药库
+                              ↓
+                     同一个 CloudBase api
+                              ↓
+                     经授权的小程序账号
 ```
 
-当前工程参数：
+两块板不能共用 `deviceId`、密钥、SQLite 或快照会话。Release A 不迁移远程命令、人物、计划、问询、体征、记录、风险或自助配对。
 
-```text
-小程序 AppID: wx10d3642842a733e8
-CloudBase 环境 ID: cloud1-d6gv6t2jf3f2c541c
-CloudBase HTTP API: http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudbase.com/api
-第一块板 DEVICE_ID: zykh-qsm-001
-第二块板建议 DEVICE_ID: zykh-qsm-002
-```
+## 2. 交接物
 
-> 注意：如果第二块只是裸开发板、没有接 MAX30102/GY-614/STM32/喇叭等外设，那么只能验证“云端到板端 API 的链路”，不能把体征数值当作真实传感器数据。
+向第二位工程师提供：
 
-## 1. 需要交接给第二位工程师的文件
+1. 本小程序仓库的固定 commit 或发布压缩包。
+2. 与 Release A 兼容的 `Zykh-QSM Station` 固定 commit 或安装包。
+3. CloudBase 环境 ID、HTTP 访问入口和有权限的开发账号。
+4. 第二块板的全新 `deviceId`。
+5. 第二块板的独立密钥，通过安全渠道单独交接。
+6. 该微信账号所需的既有 membership 变更单。
+7. 云函数、数据库与第一块板的回滚备份位置。
 
-建议直接把整个小程序工程目录打包给对方：
+不要交接第一块板的 `.env`、SQLite、密钥、快照 lease 或运行缓存。
 
-```text
-D:\app\wechatlittleprogram
-```
+## 3. 第二台电脑准备
 
-至少必须包含：
+安装：
 
-```text
-project.config.json
-miniprogram/
-cloudfunctions/api/
-qsm_agent/
-tools/cloudbase-relay.js
-docs/MIGRATE_TO_ANOTHER_BOARD.md
-```
+- 微信开发者工具 Stable。
+- Git 与 Node.js 20 或更高版本。
+- Station 仓库要求的板端部署工具。
+- 可访问 CloudBase 的网络。
 
-如果第二块板子还没有板端主程序，还要同时交接 QSM368 板端主代码，例如：
-
-```text
-zykh_app/
-server.pl
-native/go-ui/
-scripts/
-tools/
-data/
-bin/
-```
-
-或者交接你当前最新的 `Zykh-QSM-main` 压缩包。本文默认第二块板子最终路径仍然是：
-
-```text
-/userdata/zykh_app
-```
-
-## 2. 第二台电脑准备
-
-第二台电脑需要：
-
-```text
-1. 微信开发者工具
-2. 可登录该小程序/云开发环境的微信账号
-3. ADB 工具
-4. Node.js，只有使用 USB relay 调试时需要
-5. 能访问互联网
-```
-
-检查 ADB：
+从固定 commit 检出小程序：
 
 ```powershell
-adb version
-adb devices -l
+git clone https://github.com/DonsonHH/Zykh-Miniprogram.git
+Set-Location Zykh-Miniprogram
+git checkout <交接的固定 commit>
 ```
 
-如果电脑上有多块板子或多个 Android/ADB 设备，后续命令加 `-s` 指定设备：
+运行离线检查：
 
 ```powershell
-adb -s <设备序列号> shell "echo ok"
+node --test tests/*.test.js
+node tools/validate-miniprogram-ui.js
 ```
 
-## 3. 在第二台电脑打开小程序工程
+所有检查通过后，用微信开发者工具导入仓库根目录，不能只导入 `miniprogram/` 子目录。
 
-1. 打开微信开发者工具。
-2. 选择“导入项目”。
-3. 项目目录选择交接过来的工程根目录，例如：
+## 4. CloudBase 核对
 
-   ```text
-   D:\app\wechatlittleprogram
-   ```
-
-4. 确认 AppID 是：
-
-   ```text
-   wx10d3642842a733e8
-   ```
-
-5. 确认 `miniprogram/app.js` 里的云环境是：
-
-   ```js
-   env: "cloud1-d6gv6t2jf3f2c541c"
-   ```
-
-6. 点击“编译”，确认小程序能正常打开。
-
-如果微信开发者工具提示没有云开发权限，需要用有该小程序权限的账号登录，或者让项目管理员给该工程师分配云开发权限。
-
-## 4. 确认云端资源
-
-云端资源通常不需要重建。只需要确认存在：
+当前工程使用的环境以 `miniprogram/app.js` 和 `cloudbaserc.json` 为准。生产发布前确认：
 
 ```text
-集合：
-devices
-medicines
-vitals
-records
-commands
-
-云函数：
-api
-
-HTTP 访问服务：
-/api -> api
+/api HTTP 入口 -> cloudfunctions/api
+schemaVersion -> 2
+schemaRevision -> 3.0-three-box-library
 ```
 
-在微信开发者工具里检查：
+`PING` 必须只声明 Release A 七项能力：
 
 ```text
-云开发 -> 数据库
-云开发 -> 云函数
-云开发 -> HTTP 访问服务
+snapshotBatch=v2
+snapshotFencing=v1
+snapshotCanonicalDigest=jcs-sha256-v1
+boardMedicineSnapshot=v1
+explicitInventoryState=v1
+medicineStorageBoxes=v1
+caregiverMembership=v1
 ```
 
-如果 `/api -> api` 不存在，在 HTTP 访问服务里新增：
+若出现 `remoteCommands`、`devicePairing` 或人物代次能力，停止迁移并核对发布版本。若缺任一七项能力，也不要启动第二块板同步。
 
-```text
-路径: /api
-资源类型: 云函数
-云函数: api
-```
+## 5. 创建设备身份
 
-也可以用 CloudBase CLI 创建：
-
-```powershell
-tcb login
-tcb service create -e cloud1-d6gv6t2jf3f2c541c -p api -f api
-```
-
-测试 HTTP API：
-
-```powershell
-Invoke-RestMethod `
-  -Uri "http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudbase.com/api" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body '{"action":"PING"}'
-```
-
-正常返回应包含：
-
-```json
-{
-  "ok": true,
-  "collections": {
-    "devices": "devices",
-    "medicines": "medicines",
-    "vitals": "vitals",
-    "records": "records",
-    "commands": "commands"
-  }
-}
-```
-
-## 5. 是否需要重新部署云函数
-
-如果交接的是当前完整工程，建议第二位工程师先部署一次 `api` 云函数，保证云端代码与本地一致。
-
-在微信开发者工具里：
-
-```text
-右键 cloudfunctions/api
--> 上传并部署：云端安装依赖
-```
-
-或者用微信开发者工具 CLI：
-
-```powershell
-& "微信开发者工具安装目录\cli.bat" cloud functions deploy `
-  --project D:\app\wechatlittleprogram `
-  --env cloud1-d6gv6t2jf3f2c541c `
-  --names api `
-  --remote-npm-install
-```
-
-部署后重新测试：
-
-```powershell
-Invoke-RestMethod `
-  -Uri "http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudbase.com/api" `
-  -Method Post `
-  -ContentType "application/json" `
-  -Body '{"action":"PING"}'
-```
-
-## 6. 规划第二块板的 DEVICE_ID
-
-两块板不能共用同一个 `DEVICE_ID`。
-
-建议：
-
-```text
-第一块板：zykh-qsm-001
-第二块板：zykh-qsm-002
-第三块板：zykh-qsm-003
-```
-
-云数据库里会按 `deviceId` 隔离数据：
-
-```text
-devices/zykh-qsm-002
-medicines/zykh-qsm-002-slot-1
-vitals where deviceId == zykh-qsm-002
-records where deviceId == zykh-qsm-002
-commands where deviceId == zykh-qsm-002
-```
-
-## 7. 准备第二块 QSM368 板端主程序
-
-第二块板子上必须有板端主程序：
-
-```text
-/userdata/zykh_app/server.pl
-/userdata/zykh_app/scripts/
-/userdata/zykh_app/data/
-```
-
-如果没有，先把板端主代码复制到板子：
-
-```powershell
-adb shell "mkdir -p /userdata/zykh_app"
-adb push zykh_app /userdata/
-```
-
-根据实际压缩包结构，最终必须能看到：
-
-```powershell
-adb shell "ls -l /userdata/zykh_app/server.pl"
-```
-
-启动板端后端：
-
-```powershell
-adb shell "cd /userdata/zykh_app && perl server.pl --daemon"
-```
-
-测试本地 API：
-
-```powershell
-adb shell "wget -qO- http://127.0.0.1:8080/api/status"
-```
-
-能返回 JSON 就说明 `server.pl` 已经可用。
-
-## 8. 安装 cloud_agent 到第二块板
-
-在第二台电脑的工程根目录执行：
-
-```powershell
-adb shell "mkdir -p /userdata/zykh_app/scripts /userdata/zykh_app/data"
-
-adb push qsm_agent\cloud_agent.pl /userdata/zykh_app/scripts/cloud_agent.pl
-adb push qsm_agent\start_cloud_agent.sh /userdata/zykh_app/scripts/start_cloud_agent.sh
-adb push qsm_agent\cloud_agent.env.example /userdata/zykh_app/data/cloud_agent.env
-
-adb shell "sed -i 's/\r$//' /userdata/zykh_app/scripts/cloud_agent.pl /userdata/zykh_app/scripts/start_cloud_agent.sh /userdata/zykh_app/data/cloud_agent.env"
-adb shell "chmod +x /userdata/zykh_app/scripts/cloud_agent.pl /userdata/zykh_app/scripts/start_cloud_agent.sh"
-```
-
-检查 Perl 语法：
-
-```powershell
-adb shell "perl -c /userdata/zykh_app/scripts/cloud_agent.pl"
-```
-
-正常输出：
-
-```text
-/userdata/zykh_app/scripts/cloud_agent.pl syntax OK
-```
-
-## 9. 配置第二块板的 cloud_agent.env
-
-推荐先在电脑本地新建一个 `cloud_agent.env` 文件，内容如下：
-
-```sh
-CLOUD_API_URL=http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudbase.com/api
-DEVICE_ID=zykh-qsm-002
-DEVICE_SECRET=<第二块板独立密钥>
-LOCAL_API=http://127.0.0.1:8080
-SYNC_INTERVAL=5
-```
-
-推送到板子：
-
-```powershell
-adb push cloud_agent.env /userdata/zykh_app/data/cloud_agent.env
-adb shell "sed -i 's/\r$//' /userdata/zykh_app/data/cloud_agent.env"
-```
-
-检查配置是否被板端 shell 正确读取：
-
-```powershell
-adb shell ". /userdata/zykh_app/data/cloud_agent.env; echo DEVICE_ID=\$DEVICE_ID; echo CLOUD_API_URL=\$CLOUD_API_URL"
-```
-
-应该输出：
-
-```text
-DEVICE_ID=zykh-qsm-002
-CLOUD_API_URL=http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudbase.com/api
-```
-
-如果输出为空，通常是文件有 Windows 换行，重新执行：
-
-```powershell
-adb shell "sed -i 's/\r$//' /userdata/zykh_app/data/cloud_agent.env"
-```
-
-## 10. 配置设备密钥
-
-当前云函数使用拒绝优先策略：
-
-```text
-云端未配置 DEVICE_SECRET / DEVICE_SECRETS：拒绝板端写入
-板端未提供或提供错误密钥：返回 unauthorized
-板端密钥与云端对应设备密钥一致：允许写入
-```
-
-必须为每台设备配置独立密钥。云函数环境变量配置：
-
-```json
-DEVICE_SECRETS={"zykh-qsm-001":"<第一块板独立密钥>","zykh-qsm-002":"<第二块板独立密钥>"}
-```
-
-第二块板：
-
-```sh
-DEVICE_ID=zykh-qsm-002
-DEVICE_SECRET=<第二块板独立密钥>
-```
-
-如果命令返回：
-
-```text
-unauthorized
-```
-
-就是板端 `DEVICE_SECRET` 和云函数环境变量不一致。
-
-## 11. 确认第二块板有外网
-
-正式运行时，第二块板必须能直接访问 CloudBase：
-
-```powershell
-adb shell "wget -qO- --header='Content-Type: application/json' --post-data='{\"action\":\"PING\"}' http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudbase.com/api"
-```
-
-正常返回：
-
-```json
-{"ok":true}
-```
-
-如果失败，检查：
-
-```powershell
-adb shell "ip addr"
-adb shell "ip route"
-adb shell "cat /etc/resolv.conf /tmp/resolv.conf 2>/dev/null"
-adb shell "ping -c 1 -W 3 223.5.5.5"
-adb shell "ping -c 1 -W 3 www.baidu.com"
-```
-
-### 4G 常见检查
-
-如果使用 EC200A：
-
-```powershell
-adb shell "lsusb"
-adb shell "ls -l /dev/ttyUSB*"
-adb shell "ifconfig usb0"
-adb shell "sh /userdata/zykh_app/scripts/start_4g.sh"
-```
-
-如果 `quectel-CM` 日志出现：
-
-```text
-AT+CPIN? -> +CME ERROR: 10
-```
-
-通常表示 SIM 未插入、SIM 接触不良、卡座/模块没有读到 SIM。先修 SIM，再测云同步。
-
-### Wi-Fi 常见配置
-
-如果第二块板走 Wi-Fi，需要写入 Wi-Fi 配置，具体看板端脚本支持的方式。当前脚本支持：
-
-```text
-/userdata/wifi_profiles.conf
-```
-
-格式：
-
-```text
-SSID|密码
-```
-
-然后运行：
-
-```powershell
-adb shell "sh /userdata/zykh_app/scripts/start_wifi_964.sh"
-```
-
-## 12. 无外网时的 USB relay 临时调试
-
-如果第二块板暂时没有 4G/Wi-Fi，但通过 USB 连着第二位工程师的电脑，可以用 USB relay 先验证板端同步。
-
-这个模式是：
-
-```text
-QSM368 -> USB RNDIS 网卡 -> 工程师电脑 relay -> CloudBase /api
-```
-
-它是真实板端 agent 在跑，但网络出口借电脑。正式设备不要长期依赖这个方式。
-
-### 12.1 找电脑 USB 网卡 IP
-
-在 Windows 上运行：
-
-```powershell
-ipconfig
-```
-
-找到类似：
-
-```text
-Remote NDIS based Internet Sharing Device
-IPv4 Address: 169.254.xx.xx
-```
-
-假设电脑 USB 网卡 IP 是：
-
-```text
-169.254.19.33
-```
-
-### 12.2 启动 relay
-
-在工程根目录执行：
-
-```powershell
-$env:RELAY_HOST="0.0.0.0"
-$env:RELAY_PORT="18080"
-node tools\cloudbase-relay.js
-```
-
-看到：
-
-```text
-CloudBase relay listening on http://0.0.0.0:18080/api
-Forwarding to http://cloud1-d6gv6t2jf3f2c541c-1441069580.ap-shanghai.app.tcloudbase.com/api
-```
-
-保持这个窗口不要关。
-
-### 12.3 修改板端 CLOUD_API_URL
-
-第二块板的 `/userdata/zykh_app/data/cloud_agent.env` 改成：
-
-```sh
-CLOUD_API_URL=http://169.254.19.33:18080/api
-DEVICE_ID=zykh-qsm-002
-DEVICE_SECRET=<第二块板独立密钥>
-LOCAL_API=http://127.0.0.1:8080
-SYNC_INTERVAL=5
-```
-
-其中 `169.254.19.33` 换成第二位工程师电脑自己的 USB 网卡 IP。
-
-测试：
-
-```powershell
-adb shell "wget -qO- --header='Content-Type: application/json' --post-data='{\"action\":\"PING\"}' http://169.254.19.33:18080/api"
-```
-
-能返回 `ok:true` 就说明 USB relay 可用。
-
-## 13. 前台单轮测试 cloud_agent
-
-在启动常驻进程前，先跑一轮：
-
-```powershell
-adb shell "cd /userdata/zykh_app && set -a && . /userdata/zykh_app/data/cloud_agent.env && set +a && RUN_ONCE=1 perl /userdata/zykh_app/scripts/cloud_agent.pl"
-```
-
-正常会看到：
-
-```text
-cloud agent starting device=zykh-qsm-002 local=http://127.0.0.1:8080 cloud=...
-```
-
-如果没有报错，说明：
-
-```text
-1. 配置文件读到了
-2. CloudBase /api 能访问
-3. REPORT_DEVICE 能写入云端
-4. PULL_COMMANDS 能执行
-```
-
-## 14. 启动第二块板 cloud_agent 常驻进程
-
-```powershell
-adb shell "rm -f /var/run/zykh_cloud_agent.pid"
-adb shell "sh /userdata/zykh_app/scripts/start_cloud_agent.sh"
-```
-
-查看状态：
-
-```powershell
-adb shell "cat /var/run/zykh_cloud_agent.pid"
-adb shell "tail -n 80 /userdata/zykh_app/data/cloud_agent.log"
-```
-
-确认进程还活着：
-
-```powershell
-adb shell "pid=\$(cat /var/run/zykh_cloud_agent.pid 2>/dev/null); if [ -n \"\$pid\" ] && kill -0 \"\$pid\" 2>/dev/null; then echo alive=\$pid; else echo dead; fi"
-```
-
-## 15. 在小程序绑定第二块板
-
-打开小程序：
-
-```text
-设置 -> 绑定设备
-```
-
-输入：
+为第二块板生成唯一 ID，例如：
 
 ```text
 zykh-qsm-002
 ```
 
-绑定后，首页/健康/药柜读取的就是第二块板的数据。
-
-小程序会把绑定值保存到本地缓存：
-
-```text
-wx.setStorageSync("deviceId", id)
-```
-
-所以重启小程序后不会丢。
-
-## 16. 验证第二块板是否在线
-
-在小程序设置页或首页看设备状态。云数据库 `devices` 里应该出现：
+生成至少 32 字节的随机密钥，不要复用第一块板密钥。把它加入云函数环境变量 `DEVICE_SECRETS`：
 
 ```json
 {
-  "_id": "zykh-qsm-002",
-  "deviceId": "zykh-qsm-002",
-  "online": true,
-  "cloudAgent": "running",
-  "lastSeenAt": "当前时间"
+  "zykh-qsm-001": "<第一块板密钥>",
+  "zykh-qsm-002": "<第二块板密钥>"
 }
 ```
 
-小程序判断在线的逻辑是：
+更新时必须保留仍在使用的第一块板映射。生产云函数没有共享 `DEVICE_SECRET` 回退，目标 ID 未配置时会拒绝所有板端写入。
+
+## 6. 建立账号授权
+
+Release A 不开放自助配对。上线前由管理员在受控维护流程中，为目标微信账号建立 `device_memberships` ACTIVE 授权，并确保：
+
+- membership 指向 `zykh-qsm-002`。
+- 账号标识来自可信的 CloudBase 身份，不由客户端自报。
+- 没有把第一块板的数据或人物 scope 复制给第二块板。
+- 权限只满足设备状态和药库只读需要。
+
+小程序只能从 `GET_MY_DEVICES` 返回的授权列表选择设备，不能手填 ID。
+
+## 7. 部署第二块 Station
+
+使用交接的固定 Station 构建。配置项名称以 Station 仓库为准，语义至少包含：
 
 ```text
-当前时间 - lastSeenAt < 60 秒
+CLOUD_SYNC_ENABLED=true
+CLOUD_SYNC_ENDPOINT=https://<CloudBase HTTP 域名>/api
+CLOUD_SYNC_DEVICE_ID=zykh-qsm-002
+CLOUD_SYNC_DEVICE_SECRET=<第二块板独立密钥>
 ```
 
-所以如果板子关机，最多约 60 秒后小程序会显示离线。
-
-## 17. 验证命令闭环
-
-### 17.1 测试蜂鸣
-
-在小程序：
+Station 必须实现：
 
 ```text
-设置 -> 测试蜂鸣
+PING
+REPORT_DEVICE
+BEGIN_SNAPSHOT
+UPSERT_SNAPSHOT_BATCH
+FINALIZE_SNAPSHOT
+ABORT_SNAPSHOT
 ```
 
-云数据库 `commands` 应出现：
-
-```json
-{
-  "deviceId": "zykh-qsm-002",
-  "type": "AUDIO_BEEP",
-  "status": "done"
-}
-```
-
-如果第二块开发板没有接喇叭，可能听不到声音，但仍可以看命令是否 `done`、`result.local` 是否返回本地 API 结果。
-
-### 17.2 测试一键测量
-
-在小程序：
+并持久化：
 
 ```text
-健康 -> 一键测量
+instanceId
+snapshotId
+snapshotRevision
+digest
+leaseToken
 ```
 
-云数据库应出现：
+只支持 `UPLOAD_MEDICINES` 或 `UPLOAD_SNAPSHOT` 的旧构建不兼容 Release A，不能上线。
 
-```text
-commands: READ_VITALS_ALL -> done
-vitals: 新增 deviceId=zykh-qsm-002 的记录
-```
+## 8. 首次启动顺序
 
-裸开发板没接传感器时，可能返回：
+1. 保持第一块板运行状态不变，记录其当前心跳和 manifest。
+2. 启动第二块板，但先只允许 `PING`。
+3. 核对云端版本和七项 capability。
+4. 开放 `REPORT_DEVICE`，确认只更新 `zykh-qsm-002`。
+5. 确认第一块板 `zykh-qsm-001` 的心跳没有被覆盖。
+6. 上传第二块板完整 23 行药库 staging。
+7. finalize 后核对 manifest 总数 23，分类 9/8/6。
+8. 核对 S03、S09、S13 的稳定 ID 和分类。
+9. 在小程序授权列表切换到第二块板，确认显示的是它自己的药库。
+10. 切回第一块板，确认页面状态、药库和迟到响应都没有串到第二块板。
 
-```text
-heartRate: 0
-spo2: 0
-quality: error
-```
+## 9. 药库验收
 
-这只能说明本地接口返回了错误/空值，不代表云同步失败。
+第二块板当前权威药库合同：
 
-### 17.3 测试录药同步
+- 总计 23 种。
+- `DAILY=9`、`CARE=8`、`PRESCRIPTION=6`。
+- S09 `slot-09-bifid-triple` 属于 `PRESCRIPTION`。
+- Station S03 蒙脱石散投影为 `slot-13-montmorillonite`。
+- Station S13 布洛芬缓释胶囊投影为 `slot-03-ibuprofen`。
+- 不存在 `COLD` 分类。
+- 每条药品有稳定 `medicineId`、合法 `storageBox` 和显式 `inventoryState`。
+- `cabinet_id/cabinetId` 不上传 CloudBase。
 
-在小程序：
+小程序可见集合必须完全来自 finalized manifest。本地参考表只能补充名称、厂家等展示字段，不能生成第 24 种药或补回云端缺失药。
 
-```text
-录药 -> 填药名/规格/仓位/数量/有效期 -> 保存
-```
+## 10. 小程序验收
 
-云数据库 `medicines` 应出现固定文档 ID：
+1. 冷启动先显示加载状态，不闪现“等待药箱连接”。
+2. 心跳新鲜时显示在线。
+3. 停止第二块板超过 60 秒后才显示“等待药箱连接”。
+4. 云端读取失败显示“状态暂不可用”。
+5. 云端版本不匹配显示“云端版本待升级”。
+6. 无授权账号进入授权恢复页，不读取设备数据。
+7. 药库显示 23 行、9/8/6，并保留未知但合同合法的未来药品。
+8. staging、ownerless 和其它 producer 行不可见。
+9. 小程序没有远程改药、开柜、出药或命令入口。
 
-```text
-zykh-qsm-002-slot-1
-```
+## 11. 常见问题
 
-如果当前版本同时下发了 `UPSERT_MEDICINE` 命令，板端 agent 会调用本地录药 API，再上传板端库存。
+### `unauthorized`
 
-## 18. 迁移完成判定标准
+检查 `deviceId` 是否存在于 `DEVICE_SECRETS`，以及第二块板是否使用自己的密钥。不要添加共享密钥回退。
 
-满足下面 5 条，就算第二块板迁移成功：
+### `SNAPSHOT_PROTOCOL_REQUIRED`
 
-```text
-1. 小程序能绑定 zykh-qsm-002
-2. devices/zykh-qsm-002 每 5 秒左右刷新 lastSeenAt
-3. AUDIO_BEEP 命令能从 pending -> running -> done
-4. READ_VITALS_ALL 命令能 done，并产生 vitals 记录
-5. cloud_agent.log 没有连续 unauthorized / http request failed / local API failed
-```
+板端仍在调用旧上传接口。升级 Station 到支持 begin/batch/finalize/fencing 的构建。
 
-## 19. 常见问题排查
+### 小程序显示“云端版本待升级”
 
-### 问题 1：cloud_agent 仍然访问 your-cloudbase-http-url
+线上 `PING` 与 Release A 不精确匹配。停止 Station，修正云函数版本后再继续。
 
-原因：`cloud_agent.env` 没有被正确读取，或者没有 export。
+### 小程序显示“等待药箱连接”
 
-检查：
+这是合法心跳已超过 60 秒。检查 Station worker、网络、HTTP 入口、设备身份和 `REPORT_DEVICE` 日志。
 
-```powershell
-adb shell ". /userdata/zykh_app/data/cloud_agent.env; echo \$CLOUD_API_URL"
-```
+### 药库为空但设备在线
 
-前台测试必须这样跑：
+检查是否已有 finalized medicines manifest。仅写 staging 不会改变小程序当前药库。
 
-```powershell
-adb shell "cd /userdata/zykh_app && set -a && . /userdata/zykh_app/data/cloud_agent.env && set +a && RUN_ONCE=1 perl /userdata/zykh_app/scripts/cloud_agent.pl"
-```
+### 两块板数据串用
 
-### 问题 2：配置文件里有 `^M`
+立即停止第二块板，检查是否复制了第一块板 `deviceId`、SQLite、instanceId 或 lease。恢复备份后用新身份重新迁移。
 
-检查：
+## 12. 回滚
 
-```powershell
-adb shell "cat -v /userdata/zykh_app/data/cloud_agent.env"
-```
+1. 停止第二块板同步 worker。
+2. 保留日志、失败 session 和 staging 审计数据。
+3. 从 `DEVICE_SECRETS` 移除第二块板映射，不修改第一块板映射。
+4. 撤销第二块板 membership。
+5. 恢复迁移前 manifest pointer 和相关版本数据；不要清空整个集合。
+6. 恢复 Station 程序和 SQLite 时必须成对处理，避免本地 hash 与云端 manifest 不一致。
 
-修复：
+不得通过复用第一块板身份、删除 S09、退回 22 种、伪造在线或放宽快照校验完成回滚。
 
-```powershell
-adb shell "sed -i 's/\r$//' /userdata/zykh_app/data/cloud_agent.env"
-```
+## 13. 交接签字清单
 
-### 问题 3：`http request failed`
-
-按顺序查：
-
-```powershell
-adb shell "wget -qO- --header='Content-Type: application/json' --post-data='{\"action\":\"PING\"}' <CLOUD_API_URL>"
-adb shell "ip route"
-adb shell "cat /etc/resolv.conf /tmp/resolv.conf 2>/dev/null"
-```
-
-如果板子没外网，先用 4G/Wi-Fi 修网络，或者临时用 USB relay。
-
-### 问题 4：`unauthorized`
-
-原因：云函数设置了 `DEVICE_SECRET` 或 `DEVICE_SECRETS`，但板端 `DEVICE_SECRET` 不匹配。
-
-临时开发可以清空云函数环境变量里的密钥，正式使用要让两边一致。
-
-### 问题 5：小程序显示离线，但 agent 日志正常
-
-检查 `devices/zykh-qsm-002.lastSeenAt` 是否刷新。
-
-如果云端刷新但小程序不刷新：
-
-```text
-1. 确认小程序设置页绑定的是 zykh-qsm-002
-2. 确认 miniprogram/app.js 的 env 是 cloud1-d6gv6t2jf3f2c541c
-3. 重新编译小程序
-```
-
-### 问题 6：体征数据不真实
-
-裸开发板没有外设时，这是正常的。此时只能验证：
-
-```text
-小程序 -> 云端 -> 板端 agent -> 本地 API -> 云端回写
-```
-
-不能验证真实 MAX30102/GY-614。
-
-### 问题 7：ADB 有多个设备
-
-使用：
-
-```powershell
-adb devices -l
-adb -s <设备序列号> shell "echo ok"
-```
-
-后续所有命令都加 `-s <设备序列号>`。
-
-## 20. 给第二位工程师的最短执行清单
-
-```text
-1. 在微信开发者工具打开 D:\app\wechatlittleprogram
-2. 确认 app.js 环境 ID 是 cloud1-d6gv6t2jf3f2c541c
-3. 部署 cloudfunctions/api
-4. 确认 HTTP 访问服务 /api -> api
-5. ADB 连接第二块 QSM368
-6. 确认 /userdata/zykh_app/server.pl 存在并能启动
-7. adb push qsm_agent/cloud_agent.pl 和 start_cloud_agent.sh 到 /userdata/zykh_app/scripts
-8. 写 /userdata/zykh_app/data/cloud_agent.env，DEVICE_ID=zykh-qsm-002
-9. 确认板子能 wget CloudBase /api PING
-10. RUN_ONCE=1 前台跑 cloud_agent
-11. sh /userdata/zykh_app/scripts/start_cloud_agent.sh 启动常驻
-12. 小程序设置页绑定 zykh-qsm-002
-13. 测试 AUDIO_BEEP
-14. 测试 READ_VITALS_ALL
-15. 看 commands 是否 done，devices 是否在线，vitals 是否新增
-```
-
-完成以上清单，第二块板就接入同一个小程序体系了。
+- [ ] Mini 固定 commit 与测试结果已记录。
+- [ ] Station 固定 commit 与构建哈希已记录。
+- [ ] 第二块板 ID 唯一。
+- [ ] 第二块板密钥独立并通过安全渠道交付。
+- [ ] `DEVICE_SECRETS` 保留第一块板且新增第二块板。
+- [ ] 目标账号已有受控 membership。
+- [ ] PING 精确匹配 Release A。
+- [ ] 两块板心跳可同时刷新且互不覆盖。
+- [ ] 第二块板 manifest 为 23 行、9/8/6。
+- [ ] 小程序切换设备不串数据。
+- [ ] 回滚备份和负责人已确认。

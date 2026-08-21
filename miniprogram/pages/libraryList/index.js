@@ -6,11 +6,9 @@ const {
   filterMedicines,
   summarizeMedicineLibrary,
 } = require("../../utils/medicineLibrary");
-const { FIXED_MEDICINES } = require("../../data/fixedMedicineCatalog");
 
 function medicinesForDisplay(medicines = []) {
-  if (Array.isArray(medicines) && medicines.length) return medicines;
-  return FIXED_MEDICINES.map(item => Object.assign({}, item, { hasCloudRecord: false }));
+  return Array.isArray(medicines) ? medicines : [];
 }
 
 function activeDeviceId() {
@@ -93,18 +91,26 @@ Page({
     }
     const requestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = requestId;
-    try {
-      const [device, medicines] = requestDeviceId
-        ? await Promise.all([
-          api.getDevice(requestDeviceId),
-          api.getMedicinesStrict(requestDeviceId),
-        ])
-        : [{}, []];
-      if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
-      const hasLiveMedicines = Array.isArray(medicines) && medicines.length > 0;
-      const summary = summarizeMedicineLibrary(medicinesForDisplay(medicines), {
-        includeFixedBaseline: hasLiveMedicines,
+    if (!requestDeviceId) {
+      const session = deviceSession.currentDeviceSession();
+      const connection = deviceSession.currentConnection();
+      this.stopRealtime();
+      this._hasLoadedSnapshot = false;
+      this.setData({
+        device: connection ? { connection, connectionState: connection.state, online: connection.online } : {},
+        initialLoading: false,
+        loadError: session.message || "请先确认当前账号可访问的家庭药箱。",
+        hasLoadedSnapshot: false,
       });
+      return;
+    }
+    try {
+      const [device, medicines] = await Promise.all([
+        api.getDeviceStrict(requestDeviceId),
+        api.getMedicinesStrict(requestDeviceId),
+      ]);
+      if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
+      const summary = summarizeMedicineLibrary(medicinesForDisplay(medicines));
       this._hasLoadedSnapshot = true;
       this.setData({
         deviceId: requestDeviceId,

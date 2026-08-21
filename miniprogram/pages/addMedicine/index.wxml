@@ -3,6 +3,7 @@
     title="药品维护"
     eyebrow=""
     online="{{device.online}}"
+    connection-state="{{initialLoading ? 'loading' : (device.connectionState || 'unavailable')}}"
     status-text="{{initialLoading ? '正在读取' : ''}}"
     status-hint="{{initialLoading ? '请稍候' : ''}}"
   />

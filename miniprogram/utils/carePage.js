@@ -1,3 +1,5 @@
+const { connectionCopy, projectConnection } = require("./connectionState");
+
 const CARE_STATES = ["risk", "pending", "normal", "actionable", "muted"];
 const SECTION_INTENTS = ["tasks", "inventory", "conversations", "timeline", "people", "device", "navigation"];
 const SYMBOLS = {
@@ -241,10 +243,20 @@ function composeCarePage(spec = {}) {
   const overview = (spec.overview || spec.facts || []).map(normalizeFact);
   if (overview.length > 4) throw new CarePageError("care page overview supports at most four facts");
 
+  const connection = spec.connection && spec.connection.state
+    ? spec.connection
+    : (spec.online === true
+      ? projectConnection({ heartbeatAgeMs: 0 })
+      : projectConnection({}, { unavailable: true }));
+  const connectionView = connectionCopy(connection);
   const model = {
     key: text(spec.key, title),
     title,
-    online: spec.online === true || Boolean(spec.sync && spec.sync.online),
+    online: connection.online,
+    connection,
+    connectionState: connection.state,
+    connectionStatusText: connectionView.title,
+    connectionStatusHint: connectionView.hint,
     showStatus: spec.showStatus !== false,
     phase,
     focus: phase.kind === "ready" ? {
@@ -283,11 +295,47 @@ function loadingCarePage(title, message = "") {
   });
 }
 
+function deviceAccessCarePage(title, session = {}, options = {}) {
+  const connection = session.connection && session.connection.state
+    ? session.connection
+    : projectConnection({}, {
+      availability: session.availability || "unavailable",
+      compatible: session.compatibility ? session.compatibility.compatible : undefined,
+      reason: session.message || "",
+    });
+  const copy = connectionCopy(connection);
+  const action = options.retryAction || null;
+  return composeCarePage({
+    key: `${text(title, "care")}-device-access-${connection.state}`,
+    title: text(title, "智药康护"),
+    connection,
+    phase: {
+      kind: connection.state === "loading" ? "loading" : (connection.state === "unpaired" ? "empty" : "error"),
+      message: text(session.message, [copy.title, copy.hint].filter(Boolean).join("。")),
+      action,
+    },
+  });
+}
+
+function personaMigrationCarePage(title, connection) {
+  return composeCarePage({
+    key: `${text(title, "care")}-persona-migration`,
+    title: text(title, "智药康护"),
+    connection,
+    phase: {
+      kind: "empty",
+      message: "家人照护资料正在安全迁移，完成后会自动恢复显示。",
+    },
+  });
+}
+
 module.exports = {
   CARE_STATES,
   SECTION_INTENTS,
   CarePageError,
   composeCarePage,
+  deviceAccessCarePage,
   loadingCarePage,
   normalizeState,
+  personaMigrationCarePage,
 };

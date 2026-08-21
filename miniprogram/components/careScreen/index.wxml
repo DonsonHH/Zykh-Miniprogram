@@ -3,6 +3,9 @@
     title="{{model.title || '智药康护'}}"
     eyebrow=""
     online="{{model.online}}"
+    connection-state="{{model.connectionState}}"
+    status-text="{{model.connectionStatusText}}"
+    status-hint="{{model.connectionStatusHint}}"
     show-status="{{model.showStatus}}"
   />
 

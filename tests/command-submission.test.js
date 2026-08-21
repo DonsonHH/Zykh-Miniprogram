@@ -1,14 +1,23 @@
+const fs = require("node:fs");
+const path = require("node:path");
 const test = require("node:test");
 const assert = require("node:assert/strict");
+
 const api = require("../miniprogram/utils/api");
 
-function installCloud(result) {
+function installCloud(result, options = {}) {
   const calls = [];
-  const previous = {
-    getApp: global.getApp,
-    wx: global.wx,
-  };
-  global.getApp = () => ({ globalData: { deviceId: "station-001" } });
+  const previous = { getApp: global.getApp, wx: global.wx };
+  global.getApp = () => ({
+    globalData: {
+      deviceId: options.deviceId || "station-001",
+      deviceSession: {
+        availability: "ready",
+        compatibility: { compatible: true },
+        capabilities: options.remoteCommands ? { remoteCommands: "v1" } : {},
+      },
+    },
+  });
   global.wx = {
     showToast() {},
     cloud: {
@@ -27,243 +36,96 @@ function installCloud(result) {
   };
 }
 
-test("medicine submission creates one command and never needs a client database write", { concurrency: false }, async () => {
-  const cloud = installCloud(request => (
-    request.data.action === "LIST_MEDICINES"
-      ? []
-      : { _id: "command-1", status: "pending" }
-  ));
-  try {
-    const result = await api.saveMedicine({
-      slot: 2,
-      name: "测试药品",
-      spec: "10mg*30片",
-      quantity: 4,
-      expireDate: "2027-12-31",
-      expiryPrecision: "day",
-      lowStockLine: 2,
-    }, {
-      barcode: "6901234567890",
-      unit: "瓶",
-      category: "不应由效期页覆盖",
-    });
+function emptyManifest(deviceId = "station-001") {
+  return {
+    boardMedicineSnapshot: "v1",
+    protocol: "boardMedicineSnapshot:v1",
+    deviceId,
+    kind: "medicines",
+    snapshotId: `${deviceId}-medicines-r1-test`,
+    revision: 1,
+    digest: "a".repeat(64),
+    canonicalDigestVersion: "jcs-sha256-v1",
+    snapshotComplete: true,
+    rowCount: 0,
+    finalizedAt: "2026-08-22T00:00:00.000Z",
+    rows: [],
+  };
+}
 
-    assert.equal(result.command._id, "command-1");
-    assert.equal(cloud.calls.length, 2);
-    assert.equal(cloud.calls[0].data.action, "LIST_MEDICINES");
-    const request = cloud.calls[1].data;
-    assert.equal(request.action, "CREATE_COMMAND");
-    assert.equal(request.data.type, "UPSERT_MEDICINE");
-    assert.equal(request.data.payload.operation, "patch");
-    assert.equal(request.data.payload.patch.expireDate, "2027-12-31");
-    assert.equal(request.data.payload.barcode, "6901234567890");
-    assert.equal(request.data.payload.unit, "瓶");
-    assert.equal(request.data.payload.category, "不应由效期页覆盖");
-    assert.equal(Object.hasOwn(request.data.payload.patch, "unit"), false);
-    assert.equal(Object.hasOwn(request.data.payload.patch, "category"), false);
-  } finally {
-    cloud.restore();
-  }
+test("client production code has no fixed-medicine write producer", () => {
+  const source = fs.readFileSync(
+    path.join(__dirname, "../miniprogram/utils/api.js"),
+    "utf8",
+  );
+  assert.equal(typeof api.saveMedicine, "undefined");
+  assert.doesNotMatch(source, /addCommand\(\s*["']UPSERT_MEDICINE["']/);
 });
 
-test("medicine submission refreshes board-owned fields before creating its command", { concurrency: false }, async () => {
-  const cloud = installCloud(request => {
-    if (request.data.action === "LIST_MEDICINES") {
-      return [{
-        slot: 2,
-        name: "board-medicine",
-        barcode: "barcode-from-board",
-        category: "category-from-board",
-        unit: "bottle",
-        quantity: 4,
-        expire_date: "2027-12",
-      }];
+test("Release A blocks every remote command before a cloud call", async () => {
+  const cloud = installCloud({ _id: "must-not-exist", status: "pending" });
+  try {
+    for (const type of ["AUDIO_BEEP", "AUDIO_SPEAK", "READ_VITALS_ALL", "AI_CHAT"]) {
+      await assert.rejects(
+        api.addCommand(type),
+        error => error.code === "REMOTE_COMMANDS_DISABLED",
+      );
     }
-    return { _id: "command-2", status: "pending" };
-  });
-  try {
-    await api.saveMedicine({
-      slot: 2,
-      name: "board-medicine",
-      quantity: 6,
-      expireDate: "2027-12",
-    });
-
-    assert.equal(cloud.calls.length, 2);
-    const payload = cloud.calls[1].data.data.payload;
-    assert.equal(payload.barcode, "barcode-from-board");
-    assert.equal(payload.code, "barcode-from-board");
-    assert.equal(payload.category, "category-from-board");
-    assert.equal(payload.unit, "bottle");
-    assert.equal(payload.quantity, 6);
-  } finally {
-    cloud.restore();
-  }
-});
-
-test("medicine submission stays on the medication box that started the save", { concurrency: false }, async () => {
-  const previous = {
-    getApp: global.getApp,
-    wx: global.wx,
-  };
-  const calls = [];
-  let activeDeviceId = "station-save-a";
-  let releaseMedicineRead;
-  const medicineReadGate = new Promise(resolve => {
-    releaseMedicineRead = resolve;
-  });
-
-  global.getApp = () => ({ globalData: { deviceId: activeDeviceId } });
-  global.wx = {
-    cloud: {
-      callFunction: async request => {
-        calls.push(request);
-        if (request.data.action === "LIST_MEDICINES") {
-          await medicineReadGate;
-          return { result: [] };
-        }
-        return { result: { _id: "command-fixed-scope", status: "pending" } };
-      },
-    },
-  };
-
-  try {
-    const saving = api.saveMedicine({
-      slot: 2,
-      name: "测试药品",
-      quantity: 3,
-      expireDate: "2027-12",
-      expiryPrecision: "month",
-    });
-    await new Promise(resolve => setImmediate(resolve));
-    activeDeviceId = "station-save-b";
-    releaseMedicineRead();
-    await saving;
-
-    assert.equal(calls[0].data.data.deviceId, "station-save-a");
-    assert.equal(calls[1].data.action, "CREATE_COMMAND");
-    assert.equal(calls[1].data.data.deviceId, "station-save-a");
-  } finally {
-    global.getApp = previous.getApp;
-    global.wx = previous.wx;
-  }
-});
-
-test("a medicine write stops before command creation when its snapshot cannot be read", { concurrency: false }, async () => {
-  const cloud = installCloud({ ok: false, error: "snapshot unavailable" });
-  try {
-    await assert.rejects(() => api.saveMedicine({
-      slot: 2,
-      name: "medicine",
-      quantity: 3,
-      expireDate: "2027-12",
-    }), /snapshot unavailable/);
-    assert.equal(cloud.calls.length, 1);
-    assert.equal(cloud.calls[0].data.action, "LIST_MEDICINES");
-  } finally {
-    cloud.restore();
-  }
-});
-
-test("strict cabinet reads distinguish cloud failure from a genuinely empty cabinet", { concurrency: false }, async () => {
-  const failed = installCloud({ ok: false, error: "medicine snapshot unavailable" });
-  global.wx.showToast = () => {};
-  try {
-    await assert.rejects(() => api.getCabinetSlotsStrict(), /medicine snapshot unavailable/);
-    const compatibleSlots = await api.getCabinetSlots();
-    assert.equal(compatibleSlots.length, 23);
-    assert.equal(compatibleSlots.every(slot => !slot.name), true);
-  } finally {
-    failed.restore();
-  }
-
-  const empty = installCloud([]);
-  try {
-    const slots = await api.getCabinetSlotsStrict();
-    assert.equal(slots.length, 23);
-    assert.equal(slots.every(slot => !slot.name), true);
-  } finally {
-    empty.restore();
-  }
-});
-
-test("command submission rejects cloud errors instead of fabricating success", { concurrency: false }, async () => {
-  const cloud = installCloud({ ok: false, error: "cloud unavailable" });
-  try {
-    await assert.rejects(() => api.addCommand("READ_VITALS_ALL"), /cloud unavailable/);
-    assert.equal(cloud.calls.length, 1);
-  } finally {
-    cloud.restore();
-  }
-});
-
-test("caregiver command submission blocks remote cabinet opening before any cloud call", { concurrency: false }, async () => {
-  const cloud = installCloud({ _id: "remote-open-command", status: "pending" });
-  try {
-    await assert.rejects(
-      () => api.addCommand("OPEN_CABINET", { remote_confirmed: true }),
-      /remote cabinet opening is not available/i,
-    );
     assert.equal(cloud.calls.length, 0);
   } finally {
     cloud.restore();
   }
 });
 
-test("command submission rejects an empty cloud result", { concurrency: false }, async () => {
-  const cloud = installCloud(null);
+test("physical medicine actions are permanently blocked even after remote commands open", async () => {
+  const cloud = installCloud({ _id: "must-not-exist", status: "pending" }, { remoteCommands: true });
   try {
-    await assert.rejects(() => api.addCommand("READ_VITALS_ALL"), /command submission returned no result/);
+    for (const type of ["OPEN_CABINET", "DISPENSE", "UPSERT_MEDICINE", "CABINET_LIGHT_ON"]) {
+      await assert.rejects(
+        api.addCommand(type, {}),
+        error => error.code === "REMOTE_MEDICINE_ACTION_FORBIDDEN",
+      );
+    }
+    assert.equal(cloud.calls.length, 0);
+  } finally {
+    cloud.restore();
+  }
+});
+
+test("a future remoteCommands capability permits a strict command acknowledgement", async () => {
+  const cloud = installCloud({ _id: "command-1", status: "pending" }, { remoteCommands: true });
+  try {
+    const result = await api.addCommand("AUDIO_BEEP", { reason: "device test" });
+    assert.equal(result._id, "command-1");
     assert.equal(cloud.calls.length, 1);
+    assert.equal(cloud.calls[0].data.action, "CREATE_COMMAND");
+    assert.equal(cloud.calls[0].data.data.type, "AUDIO_BEEP");
   } finally {
     cloud.restore();
   }
 });
 
-test("command submission rejects malformed or failed command acknowledgements", { concurrency: false }, async () => {
-  const malformed = installCloud({});
-  try {
-    await assert.rejects(() => api.addCommand("READ_VITALS_ALL"), /command submission returned no result/);
-  } finally {
-    malformed.restore();
-  }
-
-  const failed = installCloud({ _id: "command-failed", status: "failed", error: "board rejected it" });
-  try {
-    await assert.rejects(() => api.addCommand("READ_VITALS_ALL"), /board rejected it/);
-  } finally {
-    failed.restore();
-  }
-});
-
-test("an empty read result remains a normal empty state", { concurrency: false }, async () => {
-  const cloud = installCloud(null);
-  try {
-    assert.equal(await api.getLatestVitals(), null);
-    assert.equal(cloud.calls.length, 1);
-    assert.equal(cloud.calls[0].data.action, "GET_LATEST_VITALS");
-  } finally {
-    cloud.restore();
+test("remote command acknowledgements remain strict", async () => {
+  for (const result of [
+    null,
+    {},
+    { _id: "failed", status: "failed", error: "board rejected it" },
+    { ok: false, error: "cloud unavailable" },
+  ]) {
+    const cloud = installCloud(result, { remoteCommands: true });
+    try {
+      await assert.rejects(api.addCommand("READ_VITALS_ALL"));
+    } finally {
+      cloud.restore();
+    }
   }
 });
 
-test("strict vitals and records readers reject cloud failures while compatibility readers keep their fallbacks", { concurrency: false }, async () => {
-  const cloud = installCloud({ ok: false, error: "care data unavailable" });
-  try {
-    await assert.rejects(() => api.getLatestVitalsStrict(), /care data unavailable/);
-    await assert.rejects(() => api.getRecentVitalsStrict(), /care data unavailable/);
-    await assert.rejects(() => api.getRecentRecordsStrict(), /care data unavailable/);
-
-    assert.equal(await api.getLatestVitals(), null);
-    assert.deepEqual(await api.getRecentVitals(), []);
-    assert.deepEqual(await api.getRecentRecords(), []);
-  } finally {
-    cloud.restore();
-  }
-});
-
-test("a remote medication reminder keeps the Station service-user identity", { concurrency: false }, async () => {
-  const cloud = installCloud({ _id: "reminder-1", status: "pending" });
+test("a medication reminder carries the Station person identity when Release C opens", async () => {
+  const cloud = installCloud({ _id: "reminder-1", status: "pending" }, {
+    remoteCommands: true,
+    deviceId: "station-reminder",
+  });
   try {
     await api.requestMedicationReminder({
       id: "plan-1",
@@ -275,8 +137,45 @@ test("a remote medication reminder keeps the Station service-user identity", { c
     const payload = cloud.calls[0].data.data.payload;
     assert.equal(payload.target_user_id, "service-user-42");
     assert.equal(payload.service_user_id, "service-user-42");
-    assert.equal(cloud.calls[0].data.data.deviceId, "station-reminder");
+    assert.equal(payload.text, "王阿姨请及时用药。");
   } finally {
     cloud.restore();
+  }
+});
+
+test("strict medicine reads accept only a complete manifest envelope", async () => {
+  const empty = installCloud(emptyManifest());
+  try {
+    const rows = await api.getMedicinesStrict();
+    assert.deepEqual(rows, []);
+    assert.equal(empty.calls[0].data.action, "GET_MEDICINE_SNAPSHOT");
+  } finally {
+    empty.restore();
+  }
+
+  for (const invalid of [
+    [],
+    Object.assign(emptyManifest(), { boardMedicineSnapshot: "" }),
+    Object.assign(emptyManifest(), { snapshotComplete: false }),
+    Object.assign(emptyManifest(), { canonicalDigestVersion: "legacy" }),
+  ]) {
+    const cloud = installCloud(invalid);
+    try {
+      await assert.rejects(api.getMedicinesStrict(), /manifest/i);
+    } finally {
+      cloud.restore();
+    }
+  }
+});
+
+test("compatibility cabinet reads can render empty slots without inventing medicine rows", async () => {
+  const failed = installCloud({ ok: false, error: "medicine snapshot unavailable" });
+  try {
+    await assert.rejects(api.getCabinetSlotsStrict(), /medicine snapshot unavailable/);
+    const slots = await api.getCabinetSlots();
+    assert.equal(slots.length, 23);
+    assert.equal(slots.every(slot => !slot.name), true);
+  } finally {
+    failed.restore();
   }
 });

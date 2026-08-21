@@ -1,121 +1,182 @@
-# 智药康护小程序同步与迁移指南
+# 智药康护同步与迁移指南
 
-本文档对应 `zykh_station_app` 内置 `CloudSyncWorker` 的联网方案，不再使用本项目旧版 `qsm_agent.pl`。药品数据结构已经切换为三盒药库；先阅读 [THREE_BOX_MIGRATION.md](THREE_BOX_MIGRATION.md)。
+> 当前仓库实现 CloudBase Release A，尚未部署。Release A 只恢复设备心跳、既有账号授权和板端药库快照；人物资料、计划、问询、体征、记录、风险、自助配对及远程命令暂时失败关闭。
 
 ## 1. 同步链路
 
 ```text
-微信小程序
-  -> 云函数 api / CloudBase 数据库
-  -> QSM368 zykh_station_app CloudSyncWorker
-  -> 板端本地服务、溯源码入库与现场记录
+QSM368 Station（现场事实源）
+  -> 主动访问 CloudBase HTTP /api
+  -> 上报服务端心跳
+  -> 上传并 finalize 23 种药品的版本化快照
+
+微信小程序（家庭照护端）
+  -> wx.cloud.callFunction({ name: "api" })
+  -> 读取账号已获授权的设备
+  -> 读取 finalized 药库 manifest
 ```
 
-小程序不会直接访问板子的局域网地址。板子通过 `CloudSyncWorker` 主动访问云函数 HTTP 入口，拉取 `commands` 并上传快照数据。
+小程序不直连板子的 IP 或 `127.0.0.1`。Release A 不拉取命令，也不执行语音、测量、问询、开柜、出药或远程改药。
 
-## 2. 当前命令类型
+## 2. Release A 云端合同
 
-- `AUDIO_SPEAK`：语音提醒，板端会调用 `QsmClient().audio_speak(...)`
-- `AUDIO_BEEP`：提示音兼容命令，只保留历史/调试兼容
-- `READ_VITALS_ALL`：远程测量体征
-- `AI_CHAT`：AI 问诊
-- `UPSERT_MEDICINE`：旧客户端兼容；新流程不使用
-- `UPSERT_SERVICE_USER`：服务对象同步
-- `UPSERT_TODAY_PLAN`：今日用药计划同步
-
-新版不支持 `OPEN_CABINET`、`DISPENSE` 或舵机出药。药品由 Station 扫描入库，再通过 `UPLOAD_MEDICINES`、`UPLOAD_SNAPSHOT` 或批次快照上传。
-
-用药提醒必须使用 `AUDIO_SPEAK`，payload 至少包含：
+`PING` 必须精确返回：
 
 ```json
 {
-  "text": "张三请及时用药。",
-  "target_user_name": "张三",
-  "medicine_name": "阿莫西林胶囊",
-  "volume": 230,
-  "tts_mode": "auto"
+  "ok": true,
+  "schemaVersion": 2,
+  "schemaRevision": "3.0-three-box-library",
+  "capabilities": {
+    "snapshotBatch": "v2",
+    "snapshotFencing": "v1",
+    "snapshotCanonicalDigest": "jcs-sha256-v1",
+    "boardMedicineSnapshot": "v1",
+    "explicitInventoryState": "v1",
+    "medicineStorageBoxes": "v1",
+    "caregiverMembership": "v1"
+  }
 }
 ```
 
-旧字段 `speak_text` 不再作为小程序主字段使用。
-
-## 3. 云函数
-
-云函数目录：
+不得提前声明：
 
 ```text
-cloudfunctions/api
+serviceUserPersonaTombstones
+devicePairing
+devicePairingIssue
+remoteCommands
 ```
 
-部署方式：
+人物数据和命令要等后续独立版本完成身份代次、安全迁移和验收后再开放。
 
-```text
-微信开发者工具 -> 云开发 -> 云函数 -> api -> 上传并部署：云端安装依赖
-```
+## 3. 设备身份与密钥
 
-云端环境变量建议配置：
-
-```text
-DEVICE_SECRET=<开发阶段共享密钥>
-```
-
-多板时可改用：
+每块板必须使用唯一 `deviceId` 和独立随机密钥。生产云函数只读取 `DEVICE_SECRETS`：
 
 ```json
-DEVICE_SECRETS={"zykh-qsm-001":"第一块板密钥","zykh-qsm-002":"第二块板密钥"}
+{
+  "zykh-qsm-001": "<第一块板独立密钥>",
+  "zykh-qsm-002": "<第二块板独立密钥>"
+}
 ```
 
-## 4. 板端配置
+不支持共享 `DEVICE_SECRET` 回退。密钥不得提交到 Git、写入文档、截图或普通日志。
 
-新版板端仓库为：
-
-```text
-DonsonHH/Zykh-QSM
-```
-
-在第二块板迁移时，应部署完整新版 `zykh_station_app`，不要再复制本小程序旧版 `qsm_agent`。
-
-板端需要配置这些环境项或 `.env` 项，名称以新版仓库实际配置为准：
+Station 本地配置名称以板端仓库实际实现为准，语义至少包括：
 
 ```text
 CLOUD_SYNC_ENABLED=true
-CLOUD_SYNC_ENDPOINT=https://你的 CloudBase HTTP 访问地址/api
-CLOUD_SYNC_DEVICE_ID=zykh-qsm-002
-CLOUD_SYNC_DEVICE_SECRET=<与云函数 DEVICE_SECRETS 对应的设备独立密钥>
+CLOUD_SYNC_ENDPOINT=https://<CloudBase HTTP 域名>/api
+CLOUD_SYNC_DEVICE_ID=zykh-qsm-001
+CLOUD_SYNC_DEVICE_SECRET=<该设备对应的独立密钥>
 ```
 
-启动板端服务后，确认 `CloudSyncWorker` 日志能成功调用：
+## 4. 心跳
+
+Station 调用 `REPORT_DEVICE`。云函数忽略客户端伪造的在线状态和时间，写入服务端时间：
 
 ```text
-PING
-REPORT_DEVICE
-PULL_COMMANDS
-UPSERT_SNAPSHOT_BATCH
-FINALIZE_SNAPSHOT
+lastSeenAt
+lastSeenAtEpochMs
 ```
 
-## 5. 小程序迁移到第二块板
+`GET_DEVICE` 和 `GET_MY_DEVICES` 由服务端返回 `heartbeatAgeMs`。小程序据此区分：
 
-1. 第二块板部署最新版 `Zykh-QSM`。
-2. 给第二块板设置独立设备号，例如 `zykh-qsm-002`。
-3. 云函数环境变量里加入第二块板密钥。
-4. 由第二块板签发一次性配对码，在小程序“家人”页完成账号授权并选择 `zykh-qsm-002`。
-5. 等待板端上报 `devices.lastSeenAt`，小程序会根据最近 60 秒心跳判断在线。
-6. 先测试“测试语音提醒”，确认 `commands` 中 `AUDIO_SPEAK` 从 `pending/running` 变为 `done`。
-7. 再测试首页“提醒用药”、AI 问询、三盒药库和记录同步。
+- `loading`：正在确认授权和状态。
+- `online`：合法心跳仍新鲜。
+- `stale`：心跳超过 60 秒，显示“等待药箱连接”。
+- `unavailable`：云端读取失败。
+- `unpaired`：账号没有有效授权。
+- `incompatible`：云端版本或能力不匹配。
 
-## 6. 排障顺序
+只有 `stale` 可以使用“等待药箱连接”，其它状态不能伪装成离线。
 
-如果小程序显示未连接：
+## 5. 药库快照
 
-1. 看云数据库 `devices/{deviceId}.lastSeenAt` 是否刷新。
-2. 看板端 `CLOUD_SYNC_ENDPOINT` 是否为真实 HTTP 访问入口。
-3. 看 `DEVICE_SECRET / DEVICE_SECRETS` 是否匹配。
-4. 看板端是否能访问公网和 CloudBase 域名。
+当前药库以 Station 的 23 行数据为唯一事实源，分类为：
 
-如果语音不响：
+| `storageBox` | 显示名 | 数量 |
+| --- | --- | ---: |
+| `DAILY` | 日常用药 | 9 |
+| `CARE` | 外用护理 | 8 |
+| `PRESCRIPTION` | 慢病处方 | 6 |
 
-1. 看 `commands` 里 `AUDIO_SPEAK` 是否 `done`。
-2. 如果 `failed`，查看 `result.error`。
-3. 如果 `done` 但没声音，在板端本地测试 `/api/audio/speak` 和音频输出设备。
-4. 不要退回 `AUDIO_BEEP` 做用药提醒；蜂鸣只适合硬件链路调试。
+完整身份映射见 [BOARD_23_MEDICINES.md](BOARD_23_MEDICINES.md)。本地参考表只补充展示资料，不能凭空补出云端缺失药品。
+
+上传顺序：
+
+```text
+BEGIN_SNAPSHOT
+  -> snapshotId / revision / leaseToken
+UPSERT_SNAPSHOT_BATCH
+  -> 不可变 staging rows
+FINALIZE_SNAPSHOT
+  -> 校验数量、唯一 ID 和 JCS-SHA256 后原子切换 manifest
+```
+
+失败或主动取消使用 `ABORT_SNAPSHOT`。Station 必须持久化会话字段，以便进程重启后使用原 lease 续传。旧 revision、过期 lease 和迟到 finalize 必须被拒绝。
+
+小程序通过 `GET_MEDICINE_SNAPSHOT` 读取完整 finalized manifest。兼容接口 `LIST_MEDICINES` 也只读取同一 manifest，并一次返回全部行。staging、ownerless 和其它 producer 数据不能进入家庭端药库。
+
+旧 `UPLOAD_MEDICINES`、`UPLOAD_SNAPSHOT` 返回 `SNAPSHOT_PROTOCOL_REQUIRED`，不能继续作为新链路使用。
+
+## 6. 既有账号授权
+
+Release A 只接受已经存在且有效的 `device_memberships`：
+
+1. 小程序调用 `GET_MY_DEVICES`。
+2. 只能从返回的 ACTIVE 授权设备中选择。
+3. 不允许手填设备编号。
+4. 不提供自助签发或兑换配对码。
+5. 未授权时停止所有设备级读取。
+
+新增家属授权需要管理员在受控维护流程中完成。自助配对属于后续版本，不得为了演示绕开权限。
+
+## 7. 部署顺序
+
+1. 记录 Mini、CloudBase 和 Station commit，并备份数据库、索引、规则、环境变量和 Station SQLite。
+2. 暂停 Station 同步 worker。
+3. 在本仓库运行完整测试和 UI 静态校验。
+4. 部署 `cloudfunctions/api`，但先不启动 Station。
+5. 核对 `PING` 的版本与七项能力精确一致。
+6. 确认目标 `deviceId` 已配置于 `DEVICE_SECRETS`，且账号已有有效 membership。
+7. 部署兼容 Release A 快照协议的 Station 构建。
+8. 先观察心跳，再上传 23 行 canary 快照。
+9. 核对 manifest、9/8/6 分类以及 S03、S09、S13。
+10. 最后预览并发布小程序。
+
+详细操作和回滚见 [DEPLOYMENT.md](DEPLOYMENT.md)。
+
+## 8. 第二块板迁移
+
+第二块板不能复制第一块板的身份：
+
+1. 分配新 `deviceId`，例如 `zykh-qsm-002`。
+2. 生成新的独立随机密钥。
+3. 在云函数 `DEVICE_SECRETS` 中新增映射，保留第一块板原映射。
+4. 部署同一已验证 Station 构建和同一协议配置。
+5. 为目标家属账号建立该设备的有效 membership。
+6. 先用空业务写入之外的 `PING/REPORT_DEVICE` 验证身份。
+7. 上传第二块板自己的 23 行 finalized 药库，不复制第一块板的库存、有效期或 SQLite。
+8. 小程序从授权设备列表切换并分别验证两台设备数据不会串用。
+
+完整交接清单见 [MIGRATE_TO_ANOTHER_BOARD.md](MIGRATE_TO_ANOTHER_BOARD.md)。
+
+## 9. 排障顺序
+
+小程序状态异常时按以下顺序排查：
+
+1. `PING` 是否精确匹配 Release A。
+2. `devices/{deviceId}.lastSeenAtEpochMs` 是否持续刷新。
+3. `GET_DEVICE.heartbeatAgeMs` 是否小于 60 秒。
+4. 当前微信账号是否有该设备的 ACTIVE membership。
+5. Station 的 endpoint、deviceId 和设备独立密钥是否对应。
+6. 当前 manifest 是否 finalized、恰好 23 行且摘要一致。
+7. 小程序是否读取了 `GET_MEDICINE_SNAPSHOT`，而不是旧集合或静态药表。
+
+不要通过写死 `online=true`、伪造本地药品、放宽密钥、重新启用旧命令或删除 S09 来绕过问题。
+
+## 10. 当前状态
+
+本仓库已经包含 Release A 代码和离线测试，但这不等于线上云函数已部署，也不等于真实 Station 已升级。只有云端、Station 和小程序按同一 commit 完成真机验收后，才可以宣告同步恢复。

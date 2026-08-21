@@ -39,6 +39,7 @@ function loadSettingsPage(api, context = {}) {
       if (modulePath.includes("dateTime")) return require("../miniprogram/utils/dateTime");
       if (modulePath.includes("carePlan")) return require("../miniprogram/utils/carePlan");
       if (modulePath.includes("carePage")) return require("../miniprogram/utils/carePage");
+      if (modulePath.includes("connectionState")) return require("../miniprogram/utils/connectionState");
       if (modulePath.includes("medicationSafetyEvents")) return require("../miniprogram/modules/medicationSafetyEvents");
       if (modulePath.includes("personaVisibility")) return require("../miniprogram/modules/personaVisibility");
       if (modulePath.includes("realtime")) return { subscribe: () => () => {} };
@@ -774,11 +775,10 @@ test("My Medication Boxes renders only the controls allowed by the resolved acce
   assert.match(layout, /wx:if="\{\{canPair\}\}"[\s\S]*?bindinput="onPairingCodeInput"[\s\S]*?aria-label="一次性配对码"[\s\S]*?bindtap="redeemDevicePairingCode"/);
   assert.match(layout, /bindinput="onPairingCodeInput"[\s\S]*?maxlength="256"/);
   assert.match(layout, /deviceSessionAvailability === 'error' \|\| deviceSessionAvailability === 'forbidden' \|\| deviceSessionAvailability === 'pairing-unavailable'[\s\S]*?bindtap="refreshDeviceSession"[\s\S]*?aria-label="重新读取授权药箱"/);
-  assert.match(layout, /deviceSessionMode === 'legacy' && deviceSessionAvailability === 'unsupported'/);
-  assert.match(layout, /旧版云端：切换药箱编号/);
-  assert.match(layout, /不代表账号已绑定/);
-  assert.match(layout, /wx:elif="\{\{deviceSessionMode === 'legacy' && deviceSessionAvailability === 'unsupported'\}\}"[\s\S]*?bindinput="onBindInput"[\s\S]*?aria-label="旧版药箱编号"/);
-  assert.equal((layout.match(/bindinput="onBindInput"/g) || []).length, 1);
+  assert.match(layout, /item\.statusText/);
+  assert.match(layout, /item\.statusHint/);
+  assert.match(layout, /item\.connectionState/);
+  assert.doesNotMatch(layout, /旧版云端|旧版药箱编号|onBindInput|bindDevice|toggleBindForm/);
   assert.match(styles, /\.authorized-device-row\s*\{[\s\S]*?min-height:\s*(?:9[6-9]|[1-9]\d{2,})rpx/);
   assert.match(styles, /\.device-pairing-panel input\s*\{[\s\S]*?height:\s*88rpx/);
   assert.match(styles, /\.authorized-device-row\.is-selected\s*\{/);
@@ -1183,7 +1183,7 @@ test("an invalid pairing code cannot look successful just because an older autho
   assert.doesNotMatch(toasts.join(" "), /成功/);
 });
 
-test("membership mode rejects the legacy arbitrary device-id handler fail closed", () => {
+test("membership mode has no arbitrary device-id handler and rejects injected rows", () => {
   const storage = [];
   let selectionCalls = 0;
   const app = {
@@ -1215,18 +1215,18 @@ test("membership mode rejects the legacy arbitrary device-id handler fail closed
   page.load = () => {};
   page.startRealtime = () => {};
   page.onShow();
-  page.setData({ bindValue: "typed-unauthorized-box" });
 
-  page.bindDevice();
   page.selectAuthorizedDevice({ currentTarget: { dataset: { deviceId: "row-injected-box" } } });
 
+  assert.equal(typeof page.bindDevice, "undefined");
+  assert.equal(typeof page.toggleBindForm, "undefined");
   assert.equal(selectionCalls, 0);
   assert.equal(app.globalData.deviceId, "authorized-box");
   assert.equal(page.data.deviceId, "authorized-box");
   assert.deepEqual(storage, []);
 });
 
-test("changing the medication box restarts realtime syncing before reload", () => {
+test("selecting another authorized medication box restarts syncing before reload", () => {
   const storage = [];
   const selections = [];
   const app = {
@@ -1235,16 +1235,18 @@ test("changing the medication box restarts realtime syncing before reload", () =
       deviceId: "old-box",
       deviceSessionResolved: true,
       deviceSession: {
-        mode: "legacy",
-        availability: "unsupported",
-        devices: [],
+        mode: "membership",
+        availability: "ready",
+        devices: [
+          { deviceId: "old-box", name: "旧药箱" },
+          { deviceId: "new-box", name: "新药箱" },
+        ],
         selectedDeviceId: "old-box",
         canPair: false,
       },
     },
     selectAuthorizedDevice(deviceId) {
       selections.push(deviceId);
-      storage.push(["deviceId", deviceId]);
       const next = Object.assign({}, this.globalData.deviceSession, { selectedDeviceId: deviceId });
       this.globalData.deviceSession = next;
       this.globalData.deviceId = deviceId;
@@ -1261,9 +1263,7 @@ test("changing the medication box restarts realtime syncing before reload", () =
     },
   });
   page.data = {
-    bindValue: "new-box",
     deviceId: "old-box",
-    showBindForm: true,
     detailVisible: true,
     detailMode: "family",
     detailTitle: "全部家人",
@@ -1274,8 +1274,12 @@ test("changing the medication box restarts realtime syncing before reload", () =
     commands: [{ id: "old-command" }],
     safetyState: { availability: "ready", events: [{ id: "old-safety" }] },
     carePage: { phase: { kind: "ready" } },
-    deviceSessionMode: "legacy",
-    deviceSessionAvailability: "unsupported",
+    deviceSessionMode: "membership",
+    deviceSessionAvailability: "ready",
+    authorizedDevices: [
+      { deviceId: "old-box", selected: true },
+      { deviceId: "new-box", selected: false },
+    ],
   };
   page.setData = next => Object.assign(page.data, next);
   let restarts = 0;
@@ -1283,12 +1287,12 @@ test("changing the medication box restarts realtime syncing before reload", () =
   page.startRealtime = () => { restarts += 1; };
   page.load = () => { reloads += 1; };
 
-  page.bindDevice();
+  page.selectAuthorizedDevice({ currentTarget: { dataset: { deviceId: "new-box" } } });
 
   assert.deepEqual(selections, ["new-box"]);
   assert.equal(restarts, 1);
   assert.equal(reloads, 1);
-  assert.deepEqual(storage, [["deviceId", "new-box"]]);
+  assert.deepEqual(storage, []);
   assert.equal(page.data.detailVisible, false);
   assert.equal(page.data.detailMode, "lines");
   assert.deepEqual(Array.from(page.data.detailLines), []);
@@ -1308,9 +1312,9 @@ test("showing settings for a different medication box clears the old interaction
         env: "demo",
         deviceSessionResolved: true,
         deviceSession: {
-          mode: "legacy",
-          availability: "unsupported",
-          devices: [],
+          mode: "membership",
+          availability: "ready",
+          devices: [{ deviceId: "new-box", name: "新药箱" }],
           selectedDeviceId: "new-box",
           canPair: false,
         },
@@ -1319,8 +1323,6 @@ test("showing settings for a different medication box clears the old interaction
   });
   page.data = {
     deviceId: "old-box",
-    bindValue: "unfinished-draft",
-    showBindForm: true,
     detailVisible: true,
     detailMode: "family",
     detailTitle: "旧药箱家人",
@@ -1343,7 +1345,6 @@ test("showing settings for a different medication box clears the old interaction
   assert.equal(reloads, 1);
   assert.equal(realtimeStarts, 1);
   assert.equal(page.data.deviceId, "new-box");
-  assert.equal(page.data.bindValue, "new-box");
   assert.equal(page.data.detailVisible, false);
   assert.equal(page.data.detailMode, "lines");
   assert.deepEqual(Array.from(page.data.detailLines), []);
@@ -1358,6 +1359,23 @@ test("showing settings for a different medication box clears the old interaction
 test("a first load failure after switching boxes shows an error instead of reviving the old box", async () => {
   let appDeviceId = "old-box";
   let failNewBox = true;
+  const app = {
+    globalData: {
+      deviceId: "old-box",
+      env: "demo",
+      deviceSessionResolved: true,
+      deviceSession: {
+        mode: "membership",
+        availability: "ready",
+        devices: [
+          { deviceId: "old-box", name: "旧药箱" },
+          { deviceId: "new-box", name: "新药箱" },
+        ],
+        selectedDeviceId: "old-box",
+        canPair: false,
+      },
+    },
+  };
   const page = loadSettingsPage({
     getSnapshotStrict: async options => {
       if (options.deviceId === "new-box" && failNewBox) throw new Error("new box unavailable");
@@ -1379,20 +1397,11 @@ test("a first load failure after switching boxes shows an error instead of reviv
     },
     getCapabilitiesStrict: async () => ({ capabilities: {} }),
   }, {
-    getApp: () => ({
-      globalData: {
-        deviceId: appDeviceId,
-        env: "demo",
-        deviceSessionResolved: true,
-        deviceSession: {
-          mode: "legacy",
-          availability: "unsupported",
-          devices: [],
-          selectedDeviceId: appDeviceId,
-          canPair: false,
-        },
-      },
-    }),
+    getApp: () => {
+      app.globalData.deviceId = appDeviceId;
+      app.globalData.deviceSession.selectedDeviceId = appDeviceId;
+      return app;
+    },
   });
   page.data.deviceId = "old-box";
   page.setData = next => Object.assign(page.data, next);
@@ -1478,7 +1487,7 @@ test("family settings pins each load to its starting medication box and ignores 
   assert.deepEqual(requests.safety, ["old-box", "new-box"]);
 });
 
-test("a membership snapshot cannot replace the selected scope with an unauthorized device id", async () => {
+test("an obsolete snapshot device field cannot replace the selected authorized scope", async () => {
   const page = loadSettingsPage({
     getSnapshot: async () => ({
       device: { deviceId: "injected-box", online: true },
@@ -1498,8 +1507,10 @@ test("a membership snapshot cannot replace the selected scope with an unauthoriz
   await page.load();
 
   assert.equal(page.data.deviceId, "authorized-box");
-  assert.deepEqual(Array.from(page.data.familyMembers), []);
-  assert.equal(page.data.carePage.phase.kind, "error");
+  assert.deepEqual(Array.from(page.data.familyMembers, item => item.name), ["不应显示"]);
+  assert.equal(page.data.carePage.phase.kind, "ready");
+  const source = fs.readFileSync(pagePath, "utf8");
+  assert.doesNotMatch(source, /snapshot\.device/);
 });
 
 test("membership data loading stops before I/O when the current device is not authorized", async () => {

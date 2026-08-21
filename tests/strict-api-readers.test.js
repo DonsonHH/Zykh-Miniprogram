@@ -61,7 +61,7 @@ function installCloud(handler, initialDeviceId = "station-strict") {
   };
 }
 
-test("strict device reads expose GET_DEVICE failures while the compatibility reader stays offline", async () => {
+test("both device readers reject GET_DEVICE failures instead of inventing an offline row", async () => {
   const restore = installCloud(async ({ action }) => {
     assert.equal(action, "GET_DEVICE");
     throw new Error("device transport failed");
@@ -69,15 +69,13 @@ test("strict device reads expose GET_DEVICE failures while the compatibility rea
 
   try {
     await assert.rejects(api.getDeviceStrict(), /device transport failed/);
-    const fallback = await api.getDevice();
-    assert.equal(fallback.deviceId, "station-strict");
-    assert.equal(fallback.online, false);
+    await assert.rejects(api.getDevice(), /device transport failed/);
   } finally {
     restore();
   }
 });
 
-test("a successful null GET_DEVICE response normalizes to the requested offline device", async () => {
+test("a successful null GET_DEVICE response is still invalid", async () => {
   const restore = installCloud(async ({ action, data }) => {
     assert.equal(action, "GET_DEVICE");
     assert.equal(data.deviceId, "station-null");
@@ -85,10 +83,10 @@ test("a successful null GET_DEVICE response normalizes to the requested offline 
   });
 
   try {
-    const device = await api.getDeviceStrict("station-null");
-    assert.equal(device.deviceId, "station-null");
-    assert.equal(device._id, "station-null");
-    assert.equal(device.online, false);
+    await assert.rejects(
+      api.getDeviceStrict("station-null"),
+      error => error.code === "DEVICE_SNAPSHOT_INVALID",
+    );
   } finally {
     restore();
   }
@@ -426,7 +424,7 @@ test("cloud adapter preserves permission metadata for caregiver-safe error state
   }
 });
 
-test("the compatibility snapshot fallback keeps the device captured before GET_SNAPSHOT failed", async () => {
+test("the snapshot adapter has no legacy person-data fallback", async () => {
   const scopes = [];
   const restore = installCloud(async ({ action, data }, state) => {
     scopes.push({ action, deviceId: data.deviceId });
@@ -450,19 +448,8 @@ test("the compatibility snapshot fallback keeps the device captured before GET_S
   }, "station-before-failure");
 
   try {
-    const snapshot = await api.getSnapshot({ inquiryLimit: 8 });
-    assert.equal(snapshot.compatibilityMode, true);
-    assert.deepEqual(snapshot.serviceUsers, [{
-      id: "member-legacy",
-      name: "家庭成员",
-      age: "",
-      profile: "",
-      status: "",
-      personaGeneration: "",
-      safetyProfileRevision: "",
-      safetyProfileUpdatedAt: "",
-      archived: false,
-    }]);
+    await assert.rejects(api.getSnapshot({ inquiryLimit: 8 }), /legacy snapshot action unavailable/);
+    assert.equal(scopes.length, 1);
     assert.ok(scopes.every(call => call.deviceId === "station-before-failure"));
   } finally {
     restore();

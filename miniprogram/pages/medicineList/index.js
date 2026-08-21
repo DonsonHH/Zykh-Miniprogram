@@ -2,7 +2,7 @@ const api = require("../../utils/api");
 const realtime = require("../../utils/realtime");
 const deviceSession = require("../../utils/deviceSession");
 const cabinetView = require("../../utils/cabinetView");
-const { firstEmptyCabinetSlot, isCabinetSlot } = require("../../utils/cabinetSlots");
+const { firstEmptyCabinetSlot } = require("../../utils/cabinetSlots");
 
 function activeDeviceId() {
   const app = getApp();
@@ -195,14 +195,11 @@ Page({
 
   selectSlot(e) {
     if (!this.data.hasLoadedSnapshot || activeDeviceId() !== String(this.data.deviceId || "").trim()) return;
-    const slot = Number(e.currentTarget.dataset.slot || 1);
-    wx.navigateTo({ url: `/pages/addMedicine/index?slot=${slot}` });
+    wx.showToast({ title: "药品请在药箱端维护", icon: "none" });
   },
 
   goAddMedicine() {
     if (!this.data.hasLoadedSnapshot || activeDeviceId() !== String(this.data.deviceId || "").trim()) return;
-    const slot = Number(this.data.primarySlot);
-    if (!isCabinetSlot(slot)) return;
-    wx.navigateTo({ url: `/pages/addMedicine/index?slot=${slot}` });
+    wx.showToast({ title: "药品请在药箱端维护", icon: "none" });
   },
 });

@@ -1,65 +1,144 @@
-# 小程序与 CloudBase 部署
+# CloudBase Release A 部署说明
 
-## 1. 准备
+> 本文件描述待执行流程。仓库中的实现不代表云函数、数据库或真实板端已经部署。
 
-- 微信开发者工具 Stable
-- 已创建的小程序与 CloudBase 环境
-- 对目标 CloudBase 环境拥有云函数部署权限
-- 已完成 Station 端 `3.0-three-box-library` 协议迁移
+## 1. 发布目标
 
-不要把设备密钥、数据库或一次性配对码写进仓库。
+Release A 只恢复三件事：
 
-## 2. 配置项目
+1. 已授权账号读取设备状态。
+2. Station 上报服务端心跳。
+3. Station 通过版本化快照上传 23 种药品，小程序只读 finalized manifest。
 
-使用微信开发者工具导入仓库根目录。公共配置位于：
+人物、计划、问询、体征、记录、风险事件、自助配对和远程命令在本阶段失败关闭。不要为演示伪造 capability、心跳或本地药品。
 
-- `project.config.json`
-- `cloudbaserc.json`
+## 2. 发布前备份
 
-若 AppID 或环境 ID 与你的环境不同，请在发布前按微信平台配置更新。个人开发者工具状态应保存在 `project.private.config.json`，该文件已被忽略。
+记录 Mini、CloudBase 和 Station 的 commit SHA，并导出以下内容：
 
-## 3. 部署云函数
+- CloudBase 数据集合、索引和安全规则。
+- 云函数环境变量、HTTP 触发器、并发数和超时。
+- `devices`、membership、命令、人物、计划、问询、体征、记录和风险相关数据。
+- Station SQLite 和当前可恢复程序包。
 
-在微信开发者工具中右键 `cloudfunctions/api`，选择“上传并部署：云端安装依赖”。部署完成后调用 `PING`，至少核对：
+暂停 Station 同步 worker 后再部署云函数，避免协议切换中自动写入。
+
+## 3. 环境变量
+
+生产环境只读取逐设备密钥映射 `DEVICE_SECRETS`：
 
 ```json
-{
-  "schemaVersion": 2,
-  "schemaRevision": "3.0-three-box-library"
-}
+{"zykh-qsm-001":"<至少 32 字节的独立随机密钥>"}
 ```
 
-生产环境还应确认 `capabilities` 中声明的功能与实际部署一致。不要仅检查 `schemaVersion`。
+- 不支持共享 `DEVICE_SECRET` 回退。
+- 密钥不得写入 Git、截图或日志。
+- 每块板使用独立 `deviceId` 和独立密钥。
+- 未配置目标设备密钥时，所有板端 action 都应拒绝。
 
-## 4. 数据与授权
+## 4. 数据集合
 
-云端需要按当前 API 建立对应集合和索引。账号必须通过 membership 获得设备访问权限；新账号使用 Station 管理端签发的一次性配对码。
+确认至少存在：
 
-配对码要求：
+```text
+devices
+device_memberships
+snapshot_heads
+snapshot_sessions
+snapshot_rows
+snapshot_manifests
+```
 
-- 有效期 5–15 分钟
-- 仅使用一次
-- 明文仅在 Station 管理页面显示一次
-- 云端只保存哈希，不可反查
+既有业务集合保留，不做全集合清理。`snapshot_rows` 和 `snapshot_manifests` 是不可变版本数据；旧 finalized 版本至少保留 10 分钟。ownerless 或其它 producer 数据不得由 finalize 自动删除。
 
-## 5. 发布小程序
+## 5. 离线验证
 
-1. 在开发者工具完成编译与真机预览。
-2. 验证首页、药库、问询、照护、家人五个 Tab。
-3. 验证药库只显示日常高频内服 9 种、外用消毒护理 8 种、慢病处方储备 5 种，共 22 种；不出现旧仓位或开柜入口。
-4. 验证切换设备不会显示上一台设备的数据。
-5. 验证 Station 离线时显示最后同步时间，而不是假在线或空数据。
-6. 上传代码并在微信公众平台提交审核。
-
-## 6. 自动化验证
+在仓库根目录执行：
 
 ```bash
 node --test tests/*.test.js
 node tools/validate-miniprogram-ui.js
 ```
 
-当前发布门槛是全部自动化测试与 UI 校验通过。
+确认工作树中的云函数来自固定 commit，不从未记录的临时文件直接部署。
 
-## 7. 回滚与兼容
+## 6. 部署云函数
 
-若线上 CloudBase 或 Station 尚未升级，不要通过伪造 capability 强行开启三盒药库；小程序会对明确缺失的能力显示“未支持”或“待确认”。部署前必须完成 [三盒架构迁移](THREE_BOX_MIGRATION.md) 并备份旧数据。
+在微信开发者工具中右键 `cloudfunctions/api`，选择“上传并部署：云端安装依赖”。板端仍保持暂停，先调用 `PING`。
+
+Release A 必须精确返回以下能力：
+
+```json
+{
+  "ok": true,
+  "schemaVersion": 2,
+  "schemaRevision": "3.0-three-box-library",
+  "capabilities": {
+    "snapshotBatch": "v2",
+    "snapshotFencing": "v1",
+    "snapshotCanonicalDigest": "jcs-sha256-v1",
+    "boardMedicineSnapshot": "v1",
+    "explicitInventoryState": "v1",
+    "medicineStorageBoxes": "v1",
+    "caregiverMembership": "v1"
+  }
+}
+```
+
+不得出现：
+
+```text
+serviceUserPersonaTombstones
+devicePairing
+devicePairingIssue
+remoteCommands
+```
+
+PING 不符合时不要启动板端，直接恢复上一版云函数。
+
+## 7. 启动 Station
+
+Station 端必须先实现同一套协议：
+
+```text
+PING
+REPORT_DEVICE
+BEGIN_SNAPSHOT
+UPSERT_SNAPSHOT_BATCH
+FINALIZE_SNAPSHOT
+ABORT_SNAPSHOT
+GET_BOARD_MEDICINE_MANIFEST（核对云端 manifest）
+```
+
+其中小程序使用 `GET_MEDICINE_SNAPSHOT` 读取完整 finalized envelope；Station 使用受设备鉴权保护的 `GET_BOARD_MEDICINE_MANIFEST` 只读取当前 manifest 元数据，并据此判断是否需要重传。两者不能互换，也不能绕过 finalized pointer 直接读取 staging 行。
+
+Station 需持久化 `instanceId/snapshotId/revision/digest/leaseToken`，重启时带原 lease 恢复上传。lease 过期后由更高 revision 接管，旧 revision 后续 batch/finalize 必须被拒绝。
+
+不要让当前只支持旧 `UPLOAD_MEDICINES` 或 `UPLOAD_SNAPSHOT` 的板端连接 Release A；这两个入口会返回 `SNAPSHOT_PROTOCOL_REQUIRED`。
+
+## 8. 验收
+
+1. `devices/zykh-qsm-001.lastSeenAtEpochMs` 持续刷新。
+2. 设备文档显示 `agentVersion=release-a-snapshot-v1` 和 `schemaRevision=3.0-three-box-library`。
+3. `GET_DEVICE` 返回服务端计算的 `heartbeatAgeMs`。
+4. Station 的 `GET_BOARD_MEDICINE_MANIFEST` 与小程序的 `GET_MEDICINE_SNAPSHOT` 指向同一 finalized 版本。
+5. 当前 manifest 恰好 23 行，分类为 9/8/6。
+6. S09 可见于“慢病处方”。
+7. S03 显示蒙脱石散，S13 显示布洛芬缓释胶囊。
+8. 写入未 finalize staging、ownerless 或其它 producer 行，小程序仍只显示上一版 manifest。
+9. 停止心跳超过 60 秒后，小程序才显示“等待药箱连接”；恢复后下一轮轮询自动在线。
+10. `OPEN_CABINET`、`DISPENSE`、`UPSERT_MEDICINE` 和任意远程命令均不能执行。
+11. 人物相关页面显示安全迁移状态，不回退到按姓名或旧 deviceId 读取。
+
+## 9. 小程序发布
+
+真机预览确认首页、药库、问询、照护和家人五个 Tab。药库可见集合必须来自完整 manifest；“家人”页只能选择账号已有 ACTIVE membership 的药箱，不提供手填编号。
+
+确认一轮 20 秒页面轮询和一次 60 秒断网恢复后，再上传小程序并提交审核。
+
+## 10. 回滚
+
+- PING 不合格：保持 Station 暂停，恢复上一版云函数和环境变量。
+- 快照失败：暂停 Station，保存日志和 manifest 指针，成对恢复云端指针、版本数据和 Station SQLite。
+- 不得通过删除 S09、改回 22 种、放宽摘要或回执校验解决同步失败。
+- 小程序发布失败可单独回滚小程序；已验证的云端 manifest 不应因此改写。

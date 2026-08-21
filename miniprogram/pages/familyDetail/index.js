@@ -1,8 +1,15 @@
 const api = require("../../utils/api");
 const realtime = require("../../utils/realtime");
 const { isDoneStatus, isPlanActionable, isPlanDueToday, planTimeValue } = require("../../utils/carePlan");
-const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
-const { runAfterDeviceSessionReady } = require("../../utils/deviceSession");
+const {
+  composeCarePage,
+  loadingCarePage,
+  personaMigrationCarePage,
+} = require("../../utils/carePage");
+const {
+  isPersonaMigrationError,
+  runAfterDeviceSessionReady,
+} = require("../../utils/deviceSession");
 const medicationSafetyEvents = require("../../modules/medicationSafetyEvents");
 const vitalsAttribution = require("../../modules/vitalsAttribution");
 const personaVisibility = require("../../modules/personaVisibility");
@@ -221,6 +228,7 @@ function buildPersonCarePage({ scope = {}, user = {}, device = {}, plans = [], i
     key: "family-person-detail",
     title: "家人照护详情",
     online: device.online === true,
+    connection: device.connection,
     focus: {
       eyebrow: "只读照护档案",
       title: personName,
@@ -387,7 +395,8 @@ Page({
       this.setData({ carePage: loadingCarePage("家人照护详情", "正在整理这位家人的照护资料…") });
     }
     try {
-      const [snapshot, recentVitals, safetyState] = await Promise.all([
+      const [device, snapshot, recentVitals, safetyState] = await Promise.all([
+        api.getDeviceStrict(requestDeviceId),
         api.getSnapshotStrict({ inquiryLimit: 60, deviceId: requestDeviceId }),
         api.getRecentVitalsStrict(80, requestDeviceId),
         medicationSafetyEventModule.list({ personId: scope.personId, limit: 50, deviceId: requestDeviceId }),
@@ -454,7 +463,7 @@ Page({
       }
       const nextData = {
         selectedUser: user,
-        device: snapshot.device || {},
+        device,
         plans,
         inquiries,
         vitals,
@@ -468,6 +477,12 @@ Page({
     } catch (error) {
       if (loadRequestId !== this._loadRequestId || text(this.data.deviceId) !== requestDeviceId) return;
       if (!initialLoad) return;
+      if (isPersonaMigrationError(error)) {
+        const app = getApp();
+        const session = app && app.globalData && app.globalData.deviceSession || {};
+        this.setData({ carePage: personaMigrationCarePage("家人照护详情", session.connection) });
+        return;
+      }
       this.setData({
         carePage: composeCarePage({
           key: "family-person-error",

@@ -147,20 +147,12 @@
 
 .device-access-note,
 .device-access-message,
-.device-access-warning,
 .device-pairing-message {
   margin-top: 8rpx;
   color: #637083;
   font-size: 25rpx;
   font-weight: 650;
   line-height: 1.5;
-}
-
-.device-access-warning {
-  padding: 16rpx;
-  border-radius: 14rpx;
-  color: #8a4b0f;
-  background: #fff4df;
 }
 
 .authorized-device-list {
@@ -196,7 +188,16 @@
   min-width: 0;
 }
 
+.authorized-device-row__top {
+  display: flex;
+  align-items: center;
+  gap: 12rpx;
+  min-width: 0;
+}
+
 .authorized-device-row__name {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   color: #172033;
   font-size: 28rpx;
@@ -206,15 +207,40 @@
   white-space: nowrap;
 }
 
+.authorized-device-row__status {
+  flex: 0 0 auto;
+  padding: 4rpx 10rpx;
+  border-radius: 10rpx;
+  color: #566276;
+  background: #eef2f7;
+  font-size: 24rpx;
+  font-weight: 750;
+  line-height: 1.35;
+}
+
+.authorized-device-row__status.is-online {
+  color: #087668;
+  background: #e5f7f2;
+}
+
+.authorized-device-row__status.is-stale {
+  color: #9a5b08;
+  background: #fff3db;
+}
+
+.authorized-device-row__status.is-incompatible,
+.authorized-device-row__status.is-unavailable {
+  color: #9f2f2a;
+  background: #fff0ef;
+}
+
 .authorized-device-row__meta {
-  overflow: hidden;
   margin-top: 4rpx;
   color: #637083;
   font-size: 25rpx;
   font-weight: 650;
   line-height: 1.4;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .authorized-device-row__state {
@@ -255,8 +281,7 @@
   color: #b42318;
 }
 
-.device-detail-actions,
-.device-bind-panel__actions {
+.device-detail-actions {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 12rpx;
@@ -293,30 +318,6 @@
 
 .device-action.is-disabled {
   opacity: 0.55;
-}
-
-.device-bind-panel {
-  margin-top: 16rpx;
-  padding: 18rpx;
-  border: 1rpx solid #dce6f2;
-  border-radius: 18rpx;
-  background: #f8fbff;
-}
-
-.device-bind-panel input {
-  width: 100%;
-  height: 88rpx;
-  padding: 0 18rpx;
-  border: 1rpx solid #d6e1ee;
-  border-radius: 14rpx;
-  box-sizing: border-box;
-  color: #172033;
-  background: #ffffff;
-  font-size: 27rpx;
-}
-
-.device-bind-panel__actions {
-  margin-top: 12rpx;
 }
 
 .family-detail-link,

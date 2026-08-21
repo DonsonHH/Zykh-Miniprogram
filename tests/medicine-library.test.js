@@ -1,68 +1,117 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
+
 const {
+  STORAGE_BOXES,
+  decorateMedicine,
   filterMedicines,
-  isAttentionMedicine,
-  storageBoxId,
+  storageBoxFor,
   summarizeMedicineLibrary,
 } = require("../miniprogram/utils/medicineLibrary");
 
-test("canonical medicine classification wins over an obsolete cloud box value", () => {
-  assert.equal(storageBoxId({ name: "创口贴", storageBox: "DAILY" }), "CARE");
-  assert.equal(storageBoxId({ name: "维生素", storage_box: "CARE" }), "CARE");
-  assert.equal(storageBoxId({ name: "任意药品", box_type: "2" }), "CARE");
+test("the three user-facing box labels match the board contract", () => {
+  assert.deepEqual(
+    STORAGE_BOXES.map(box => [box.id, box.label]),
+    [
+      ["DAILY", "日常用药"],
+      ["CARE", "外用护理"],
+      ["PRESCRIPTION", "慢病处方"],
+    ],
+  );
 });
 
-test("the current 22 medicines are deterministically grouped into three boxes", () => {
-  assert.equal(storageBoxId({ slot: 2, name: "多维元素片" }), "PRESCRIPTION");
-  assert.equal(storageBoxId({ slot: 4, name: "阿莫西林胶囊" }), "PRESCRIPTION");
-  assert.equal(storageBoxId({ slot: 8, name: "藿香正气丸" }), "DAILY");
-  assert.equal(storageBoxId({ slot: 12, name: "铝碳酸镁咀嚼片" }), "DAILY");
-  assert.equal(storageBoxId({ slot: 1, name: "复方感冒灵颗粒" }), "DAILY");
-  assert.equal(storageBoxId({ slot: 20, name: "创口贴" }), "CARE");
+test("storage classification requires an explicit box or stable known identity", () => {
+  assert.equal(storageBoxFor({ storageBox: "CARE" }).id, "CARE");
+  assert.equal(storageBoxFor({ medicineId: "slot-09-bifid-triple" }).id, "PRESCRIPTION");
+  assert.equal(storageBoxFor({ legacySlot: 1 }), null);
+  assert.equal(storageBoxFor({ name: "复方感冒灵颗粒" }), null);
 });
 
-test("medicine names provide a safe compatibility classification when slots are absent", () => {
-  assert.equal(storageBoxId({ name: "苯磺酸氨氯地平片" }), "PRESCRIPTION");
-  assert.equal(storageBoxId({ name: "莫匹罗星软膏" }), "CARE");
-  assert.equal(storageBoxId({ name: "布洛芬缓释胶囊" }), "DAILY");
+test("an unknown valid board medicine remains visible", () => {
+  const medicine = decorateMedicine({
+    medicineId: "future-board-medicine",
+    name: "新接入药品",
+    storageBox: "CARE",
+    inventoryState: "UNKNOWN",
+    expireDate: "2028-01-01",
+  });
+  assert.equal(medicine.medicineId, "future-board-medicine");
+  assert.equal(medicine.storageBoxLabel, "外用护理");
+  assert.equal(medicine.name, "新接入药品");
 });
 
-test("library summary counts expiry and explicit inventory facts without guessing low stock", () => {
+test("invalid or missing classification fails closed", () => {
+  assert.throws(
+    () => decorateMedicine({ medicineId: "unknown", name: "未分类药品" }),
+    error => error.code === "MEDICINE_STORAGE_BOX_INVALID",
+  );
+  assert.throws(
+    () => decorateMedicine({ medicineId: "unknown", name: "未分类药品", storageBox: "COLD" }),
+    error => error.code === "MEDICINE_STORAGE_BOX_INVALID",
+  );
+});
+
+test("library summary reflects only supplied manifest rows", () => {
   const summary = summarizeMedicineLibrary([
-    { medicineId: "m-1", name: "长期药", storageBox: "DAILY", inventoryState: "STOCKED", expireDate: "2099-12" },
-    { medicineId: "m-2", name: "缺药", storageBox: "CARE", inventoryState: "DEPLETED", expireDate: "2099-12" },
-    { medicineId: "m-3", name: "护理药", storageBox: "CARE", inventoryState: "UNKNOWN", expireDate: "" },
+    {
+      medicineId: "slot-01-fufang-ganmaoling",
+      name: "复方感冒灵颗粒",
+      storageBox: "DAILY",
+      inventoryState: "STOCKED",
+      expireDate: "2099-12-31",
+    },
+    {
+      medicineId: "slot-09-bifid-triple",
+      name: "双歧杆菌三联活菌肠溶胶囊",
+      storageBox: "PRESCRIPTION",
+      inventoryState: "DEPLETED",
+      expireDate: "2099-12-31",
+    },
   ]);
-
-  assert.equal(summary.medicineCount, 3);
-  assert.equal(summary.boxes.find(box => box.id === "DAILY").count, 1);
-  assert.equal(summary.boxes.find(box => box.id === "CARE").count, 2);
+  assert.equal(summary.medicineCount, 2);
+  assert.equal(summary.cabinetCount, 3);
+  assert.equal(summary.stockedCount, 1);
   assert.equal(summary.depletedCount, 1);
-  assert.equal(summary.inventoryUnknownCount, 1);
+  assert.deepEqual(summary.boxes.map(box => box.count), [1, 0, 1]);
 });
 
-test("library filters by box, attention state and medicine text", () => {
-  const summary = summarizeMedicineLibrary([
-    { medicineId: "m-1", name: "氨氯地平", storageBox: "DAILY", inventoryState: "STOCKED", expireDate: "2099-12" },
-    { medicineId: "m-2", name: "感冒灵", storageBox: "DAILY", inventoryState: "DEPLETED", expireDate: "2099-12" },
-    { medicineId: "m-3", name: "创口贴", storageBox: "CARE", inventoryState: "STOCKED", expireDate: "2099-12" },
-  ]);
-
-  assert.deepEqual(filterMedicines(summary.medicines, { box: "CARE" }).map(item => item.name), ["创口贴"]);
-  assert.deepEqual(filterMedicines(summary.medicines, { filter: "depleted" }).map(item => item.name), ["感冒灵"]);
-  assert.deepEqual(filterMedicines(summary.medicines, { keyword: "氨氯" }).map(item => item.name), ["氨氯地平"]);
+test("inventory state is explicit and quantity is legacy-only context", () => {
+  const stocked = decorateMedicine({
+    medicineId: "stocked",
+    name: "有药",
+    storageBox: "DAILY",
+    inventoryState: "STOCKED",
+    quantity: 0,
+  });
+  const unknown = decorateMedicine({
+    medicineId: "unknown-stock",
+    name: "待确认",
+    storageBox: "CARE",
+    quantity: 0,
+  });
+  assert.equal(stocked.isStocked, true);
+  assert.equal(stocked.isDepleted, false);
+  assert.equal(unknown.isInventoryUnknown, true);
 });
 
-test("catalog-only medicines do not become maintenance alerts without live facts", () => {
-  assert.equal(isAttentionMedicine({
-    hasCloudRecord: false,
-    isInventoryUnknown: true,
-    statusClass: "missing",
-  }), false);
-  assert.equal(isAttentionMedicine({
-    hasCloudRecord: true,
-    isInventoryUnknown: true,
-    statusClass: "missing",
-  }), true);
+test("library filters use box, attention and search text", () => {
+  const medicines = [
+    decorateMedicine({
+      medicineId: "daily",
+      name: "日常药",
+      storageBox: "DAILY",
+      inventoryState: "STOCKED",
+      expireDate: "2099-12-31",
+    }),
+    decorateMedicine({
+      medicineId: "care",
+      name: "护理用品",
+      storageBox: "CARE",
+      inventoryState: "DEPLETED",
+      expireDate: "2099-12-31",
+    }),
+  ];
+  assert.deepEqual(filterMedicines(medicines, { box: "CARE" }).map(item => item.medicineId), ["care"]);
+  assert.deepEqual(filterMedicines(medicines, { filter: "depleted" }).map(item => item.medicineId), ["care"]);
+  assert.deepEqual(filterMedicines(medicines, { keyword: "日常" }).map(item => item.medicineId), ["daily"]);
 });

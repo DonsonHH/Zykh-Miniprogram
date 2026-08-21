@@ -5,6 +5,7 @@ const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
 const medicationSafetyEvents = require("../../modules/medicationSafetyEvents");
 const personaVisibility = require("../../modules/personaVisibility");
 const { parseTimestamp } = require("../../utils/dateTime");
+const { connectionCopy } = require("../../utils/connectionState");
 
 const medicationSafetyEventModule = medicationSafetyEvents.createMedicationSafetyEventModule(api);
 
@@ -52,7 +53,6 @@ function clearedDeviceView(deviceId = "") {
     carePage: loadingCarePage("家人和药箱", "正在整理家人和今日照护…"),
     stale: false,
     deviceId: id,
-    bindValue: id,
     pairingCode: "",
     pairingBusy: false,
     device: {},
@@ -75,7 +75,6 @@ function clearedDeviceView(deviceId = "") {
     },
     todayCareLines: [],
     commands: [],
-    showBindForm: false,
     detailVisible: false,
     detailMode: "lines",
     detailTitle: "药箱详情",
@@ -89,6 +88,12 @@ function firstPresent(...values) {
     if (values[i] !== undefined && values[i] !== null && values[i] !== "") return values[i];
   }
   return "";
+}
+
+function isPersonaMigrationError(error) {
+  return String(error && (error.code || error.message) || "")
+    .toUpperCase()
+    .includes("PERSONA_DATA_MIGRATION_IN_PROGRESS");
 }
 
 function memberMatchesPlan(member = {}, plan = {}) {
@@ -277,7 +282,6 @@ function commandLabel(type) {
     AUDIO_BEEP: "提示音提醒",
     AUDIO_SPEAK: "语音提醒",
     AI_CHAT: "AI 问询",
-    UPSERT_MEDICINE: "药品信息同步",
   };
   return map[type] || "家庭药箱协同";
 }
@@ -312,11 +316,13 @@ function buildFamilyCarePage({ device = {}, deviceId = "", familyMembers = [], f
   const familySupporting = familyMembers.length
     ? [`已同步 ${familyMembers.length} 位家人`, safetySupporting].filter(Boolean).join(" · ")
     : (safetySupporting || "等待药箱同步家人信息");
+  const deviceStatus = connectionCopy(device.connection || { state: "unavailable" });
 
   return composeCarePage({
     key: "family-care",
     title: "家人和药箱",
     online: device.online === true,
+    connection: device.connection,
     focus: {
       eyebrow: hasPending ? "今日照护 · 下一项" : "今日照护",
       title: focusTitle,
@@ -391,14 +397,12 @@ function buildFamilyCarePage({ device = {}, deviceId = "", familyMembers = [], f
         items: [{
           key: "family-device-item",
           symbol: "device",
-          title: device.online ? "药箱在线" : "药箱未连接",
-          supporting: device.online
-            ? (device.lastSeenAt ? `最近同步 · ${device.lastSeenAt}` : "最近同步暂未返回")
-            : "连接后可查看最近同步",
+          title: deviceStatus.title,
+          supporting: device.lastSeenAt ? `最近同步 · ${device.lastSeenAt}` : deviceStatus.hint,
           meta: deviceId ? `药箱编号 ${deviceId}` : "尚未设置药箱编号",
           state: {
-            kind: device.online ? "normal" : "pending",
-            label: device.online ? "在线" : "待连接",
+            kind: device.connection && device.connection.state === "online" ? "normal" : "pending",
+            label: deviceStatus.hint,
           },
           action: {
             id: "family.device",
@@ -415,18 +419,23 @@ function deviceSessionViewData(session = {}) {
   const availability = String(session.availability || "error");
   const requestedDeviceId = String(session.selectedDeviceId || "").trim();
   const devices = Array.isArray(session.devices)
-    ? session.devices.map(device => Object.assign({}, device, {
-      deviceId: String(device && device.deviceId || "").trim(),
-      name: String(device && device.name || "").trim() || "家庭药箱",
-    })).filter(device => device.deviceId)
+    ? session.devices.map(device => {
+      const connection = device && device.connection || { state: "unavailable" };
+      const status = connectionCopy(connection);
+      const lastSeenAt = String(device && device.lastSeenAt || "").trim();
+      return Object.assign({}, device, {
+        deviceId: String(device && device.deviceId || "").trim(),
+        name: String(device && device.name || "").trim() || "家庭药箱",
+        statusText: status.title,
+        statusHint: lastSeenAt ? `最近同步 ${lastSeenAt}` : status.hint,
+        connectionState: connection.state || "unavailable",
+      });
+    }).filter(device => device.deviceId)
     : [];
   const authorizedSelection = mode === "membership"
     && availability === "ready"
     && devices.some(device => device.deviceId === requestedDeviceId);
-  const legacySelection = mode === "legacy"
-    && availability === "unsupported"
-    && Boolean(requestedDeviceId);
-  const deviceAccessReady = authorizedSelection || legacySelection;
+  const deviceAccessReady = authorizedSelection;
   const selectedDeviceId = deviceAccessReady ? requestedDeviceId : "";
   const invalidMembershipSelection = mode === "membership"
     && availability === "ready"
@@ -484,6 +493,40 @@ function deviceRecoveryCarePage(sessionView = {}) {
   });
 }
 
+function familyMigrationCarePage(device = {}, deviceId = "") {
+  const status = connectionCopy(device.connection || { state: "unavailable" });
+  return composeCarePage({
+    key: "family-persona-migration",
+    title: "家人和药箱",
+    connection: device.connection,
+    focus: {
+      eyebrow: "家人照护",
+      title: "家人资料正在安全更新",
+      supporting: "用药计划、问询和健康记录完成迁移后会自动恢复。",
+      state: { kind: "muted", label: "更新中" },
+      action: { id: "family.focus.device", label: "查看药箱状态" },
+      activation: "surface",
+    },
+    sections: [{
+      key: "family-device-section",
+      intent: "device",
+      title: "我的药箱",
+      items: [{
+        key: "family-device-item",
+        symbol: "device",
+        title: status.title,
+        supporting: device.lastSeenAt ? `最近同步 · ${device.lastSeenAt}` : status.hint,
+        meta: deviceId ? `药箱编号 ${deviceId}` : "",
+        state: {
+          kind: device.connection && device.connection.state === "online" ? "normal" : "pending",
+          label: status.hint,
+        },
+        action: { id: "family.device", label: "管理我的药箱" },
+      }],
+    }],
+  });
+}
+
 Page({
   data: {
     carePage: loadingCarePage("家人和药箱", "正在整理家人和今日照护…"),
@@ -504,7 +547,6 @@ Page({
     },
     todayCareLines: [],
     commands: [],
-    bindValue: "",
     pairingCode: "",
     pairingBusy: false,
     deviceSessionMode: "unknown",
@@ -516,7 +558,6 @@ Page({
     pairingPhase: "idle",
     pairingMessage: "",
     deviceAccessReady: false,
-    showBindForm: false,
     detailVisible: false,
     detailMode: "lines",
     detailTitle: "药箱详情",
@@ -644,14 +685,48 @@ Page({
     const loadRequestId = (this._loadRequestId || 0) + 1;
     this._loadRequestId = loadRequestId;
     try {
-      const [snapshot, commands, latestDevice, safetyState] = await Promise.all([
-        api.getSnapshotStrict({ inquiryLimit: 10, deviceId: requestDeviceId }),
-        api.getRecentCommandsStrict(6, requestDeviceId),
-        api.getDeviceStrict(requestDeviceId),
-        medicationSafetyEventModule.list({ limit: 50, deviceId: requestDeviceId }),
+      const latestDevice = await api.getDeviceStrict(requestDeviceId);
+      const [snapshotRead, commandRead, safetyRead] = await Promise.all([
+        api.getSnapshotStrict({ inquiryLimit: 10, deviceId: requestDeviceId })
+          .then(value => ({ value }), error => ({ error })),
+        api.getRecentCommandsStrict(6, requestDeviceId)
+          .then(value => ({ value }), error => ({ error })),
+        medicationSafetyEventModule.list({ limit: 50, deviceId: requestDeviceId })
+          .then(value => ({ value }), error => ({ error })),
       ]);
       if (!settingsDeviceScopeIsCurrent(this, requestDeviceId, loadRequestId)) return;
-      const returnedDevice = snapshot.device || latestDevice || {};
+      const migrationError = [snapshotRead.error, commandRead.error, safetyRead.error]
+        .filter(Boolean)
+        .find(isPersonaMigrationError);
+      if (migrationError) {
+        this.setData({
+          device: latestDevice,
+          deviceId: requestDeviceId,
+          familyMembers: [],
+          familyPreview: [],
+          todayCare: {
+            totalCount: 0,
+            pendingCount: 0,
+            doneCount: 0,
+            statusText: "更新中",
+            statusClass: "idle",
+            nextText: "家人资料正在安全更新",
+          },
+          todayCareLines: [],
+          commands: [],
+          stale: false,
+          carePage: familyMigrationCarePage(latestDevice, requestDeviceId),
+        });
+        this._hasLoadedSnapshot = true;
+        this._loadedDeviceId = requestDeviceId;
+        return;
+      }
+      const readError = [snapshotRead.error, commandRead.error, safetyRead.error].filter(Boolean)[0];
+      if (readError) throw readError;
+      const snapshot = snapshotRead.value;
+      const commands = commandRead.value;
+      const safetyState = safetyRead.value;
+      const returnedDevice = latestDevice || {};
       const returnedDeviceId = String(returnedDevice.deviceId || "").trim();
       if (this.data.deviceSessionMode === "membership"
         && returnedDeviceId
@@ -686,7 +761,6 @@ Page({
       const nextData = {
         device,
         deviceId,
-        bindValue: isSameDeviceRefresh ? this.data.bindValue : deviceId,
         familyMembers,
         familyPreview,
         safetyState: reconciledSafetyState,
@@ -735,6 +809,7 @@ Page({
           key: "family-care-error",
           title: "家人和药箱",
           online: Boolean(this.data.device && this.data.device.online),
+          connection: this.data.device && this.data.device.connection,
           phase: {
             kind: "error",
             message: "家人与药箱信息暂未同步，请稍后刷新。",
@@ -783,10 +858,6 @@ Page({
       personaGeneration: dataset.personaGeneration,
       personName: dataset.personName,
     });
-  },
-
-  onBindInput(e) {
-    this.setData({ bindValue: e.detail.value });
   },
 
   onPairingCodeInput(event) {
@@ -901,43 +972,6 @@ Page({
       wx.showToast({ title: "当前账号未获该药箱授权", icon: "none" });
       return undefined;
     }
-  },
-
-  bindDevice() {
-    if (this.data.deviceSessionMode !== "legacy"
-      || this.data.deviceSessionAvailability !== "unsupported") {
-      wx.showToast({ title: "请从账号授权的药箱中选择", icon: "none" });
-      return;
-    }
-    const id = this.data.bindValue.trim();
-    if (!id) {
-      wx.showToast({ title: "请输入旧版药箱编号", icon: "none" });
-      return;
-    }
-    try {
-      const app = getApp();
-      const session = app.selectAuthorizedDevice(id);
-      const sessionView = deviceSessionViewData(session || app.globalData.deviceSession || {});
-      if (sessionView.deviceSessionMode !== "legacy"
-        || sessionView.deviceSessionAvailability !== "unsupported"
-        || sessionView.selectedDeviceId !== id) {
-        wx.showToast({ title: "旧版药箱编号切换失败", icon: "none" });
-        return;
-      }
-      const loading = this.activateDeviceSession(session || app.globalData.deviceSession || {});
-      wx.showToast({ title: "已切换药箱" });
-      return loading;
-    } catch (error) {
-      console.warn("legacy device selection failed", error);
-      wx.showToast({ title: "旧版药箱编号切换失败", icon: "none" });
-      return undefined;
-    }
-  },
-
-  toggleBindForm() {
-    if (this.data.deviceSessionMode !== "legacy"
-      || this.data.deviceSessionAvailability !== "unsupported") return;
-    this.setData({ showBindForm: !this.data.showBindForm });
   },
 
   showFamilyDetails() {

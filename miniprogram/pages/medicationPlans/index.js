@@ -1,6 +1,11 @@
 const api = require("../../utils/api");
 const realtime = require("../../utils/realtime");
-const { runAfterDeviceSessionReady } = require("../../utils/deviceSession");
+const {
+  currentConnection,
+  currentDeviceSession,
+  isPersonaMigrationError,
+  runAfterDeviceSessionReady,
+} = require("../../utils/deviceSession");
 const planStatus = require("../../utils/carePlan");
 const { isPlanDueToday } = planStatus;
 const personaVisibility = require("../../modules/personaVisibility");
@@ -47,7 +52,8 @@ Page({
   data: {
     phase: "loading",
     phaseMessage: "正在读取今日计划…",
-    deviceOnline: false,
+    deviceOnline: null,
+    deviceConnectionState: "loading",
     dateText: todayLabel(),
     headerSubtitle: "正在同步今日安排",
     plans: [],
@@ -104,23 +110,40 @@ Page({
     });
 
     if (!requestDeviceId) {
+      const session = currentDeviceSession();
+      const connection = currentConnection();
       this.stopRealtime();
       this.setData({
         phase: "empty",
-        phaseMessage: "请先在“家人”页面确认已配对的药箱。",
+        phaseMessage: session.message || "请先在“家人”页面确认已配对的药箱。",
         plans: [],
         counts: { total: 0, taken: 0, remind: 0, notDue: 0 },
-        headerSubtitle: "尚未连接药箱",
-        deviceOnline: false,
+        headerSubtitle: connection && connection.state === "incompatible" ? "云端版本待升级" : "尚未连接药箱",
+        deviceOnline: connection ? connection.online : null,
+        deviceConnectionState: connection ? connection.state : "unpaired",
       });
       return;
     }
 
     try {
-      const [snapshot, device] = await Promise.all([
-        api.getSnapshotStrict({ inquiryLimit: 1, deviceId: requestDeviceId }),
-        api.getDeviceStrict(requestDeviceId),
-      ]);
+      const device = await api.getDeviceStrict(requestDeviceId);
+      let snapshot;
+      try {
+        snapshot = await api.getSnapshotStrict({ inquiryLimit: 1, deviceId: requestDeviceId });
+      } catch (error) {
+        if (!isPersonaMigrationError(error)) throw error;
+        if (requestId !== this._requestId || activeDeviceId() !== requestDeviceId) return;
+        this.setData({
+          phase: "empty",
+          phaseMessage: "家人的用药计划正在安全迁移，完成后会自动恢复显示。",
+          plans: [],
+          counts: { total: 0, taken: 0, remind: 0, notDue: 0 },
+          headerSubtitle: "照护资料迁移中",
+          deviceOnline: api.isDeviceOnline(device),
+          deviceConnectionState: device.connectionState || "unavailable",
+        });
+        return;
+      }
       if (requestId !== this._requestId || activeDeviceId() !== requestDeviceId) return;
 
       const serviceUsers = snapshot.serviceUsers || [];
@@ -138,6 +161,7 @@ Page({
         phase: "ready",
         phaseMessage: "",
         deviceOnline: online,
+        deviceConnectionState: device.connectionState || (online ? "online" : "unavailable"),
         plans: rows,
         counts,
         dateText: todayLabel(),
@@ -151,6 +175,8 @@ Page({
         phase: "error",
         phaseMessage: "计划暂时无法读取，请检查网络后重试。",
         headerSubtitle: "同步失败",
+        deviceOnline: null,
+        deviceConnectionState: "unavailable",
       });
     }
   },

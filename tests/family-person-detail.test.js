@@ -9,7 +9,15 @@ const pagePath = path.join(__dirname, "../miniprogram/pages/familyDetail/index.j
 function loadFamilyDetailPage(api, context = {}) {
   let definition = null;
   const pureApi = require("../miniprogram/utils/api");
-  const gateway = Object.assign({}, pureApi, { getRecentVitalsStrict: async () => [] }, api);
+  const gateway = Object.assign({}, pureApi, {
+    getDeviceStrict: async deviceId => ({
+      deviceId,
+      heartbeatAgeMs: 0,
+      lastSeenAtEpochMs: Date.now(),
+      connection: { state: "online", online: true },
+    }),
+    getRecentVitalsStrict: async () => [],
+  }, api);
   const source = fs.readFileSync(pagePath, "utf8");
   vm.runInNewContext(source, {
     Page(page) {
@@ -25,7 +33,12 @@ function loadFamilyDetailPage(api, context = {}) {
       if (modulePath.includes("capabilitySnapshot")) return require("../miniprogram/modules/capabilitySnapshot");
       if (modulePath.includes("realtime")) return context.realtime || { subscribe: () => () => {} };
       if (modulePath.includes("deviceSession")) {
-        return context.deviceSession || { runAfterDeviceSessionReady: callback => callback() };
+        return Object.assign(
+          {},
+          require("../miniprogram/utils/deviceSession"),
+          { runAfterDeviceSessionReady: callback => callback() },
+          context.deviceSession || {},
+        );
       }
       return gateway;
     },

@@ -1,13 +1,15 @@
 const api = require("../../utils/api");
 const realtime = require("../../utils/realtime");
 const deviceSession = require("../../utils/deviceSession");
-const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
+const {
+  composeCarePage,
+  deviceAccessCarePage,
+  loadingCarePage,
+} = require("../../utils/carePage");
 const { summarizeMedicineLibrary } = require("../../utils/medicineLibrary");
-const { FIXED_MEDICINES } = require("../../data/fixedMedicineCatalog");
 
 function medicinesForDisplay(medicines = []) {
-  if (Array.isArray(medicines) && medicines.length) return medicines;
-  return FIXED_MEDICINES.map(item => Object.assign({}, item, { hasCloudRecord: false }));
+  return Array.isArray(medicines) ? medicines : [];
 }
 
 function activeDeviceId() {
@@ -81,6 +83,7 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
     key: "medicine-library",
     title: "家庭药库",
     online: device.online === true,
+    connection: device.connection,
     focus,
     overview: [
       { key: "library-total", label: "全部药品", value: summary.medicineCount || 0, state: summary.medicineCount ? "actionable" : "muted" },
@@ -92,7 +95,7 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
       {
         key: "library-boxes",
         intent: "inventory",
-        title: "三个普通药柜",
+        title: "三个药柜",
         supporting: "按使用场景分柜存放",
         items: (summary.boxes || []).map(box => ({
           key: `library-box-${box.id}`,
@@ -142,6 +145,7 @@ function libraryErrorCarePage(device = {}) {
     key: "medicine-library-error",
     title: "家庭药库",
     online: device.online === true,
+    connection: device.connection,
     phase: {
       kind: "error",
       message: "药品资料读取失败，当前无法确认家庭药库状态。",
@@ -187,18 +191,25 @@ Page({
     }
     const requestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = requestId;
-    try {
-      const [device, medicines] = requestDeviceId
-        ? await Promise.all([
-          api.getDevice(requestDeviceId),
-          api.getMedicinesStrict(requestDeviceId),
-        ])
-        : [{}, []];
-      if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
-      const hasLiveMedicines = Array.isArray(medicines) && medicines.length > 0;
-      const summary = summarizeMedicineLibrary(medicinesForDisplay(medicines), {
-        includeFixedBaseline: hasLiveMedicines,
+    if (!requestDeviceId) {
+      this.stopRealtime();
+      this._hasLoadedSnapshot = false;
+      this.setData({
+        carePage: deviceAccessCarePage(
+          "家庭药库",
+          deviceSession.currentDeviceSession(),
+          { retryAction: { id: "library.retry", label: "重新确认药箱状态" } },
+        ),
       });
+      return;
+    }
+    try {
+      const [device, medicines] = await Promise.all([
+        api.getDeviceStrict(requestDeviceId),
+        api.getMedicinesStrict(requestDeviceId),
+      ]);
+      if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
+      const summary = summarizeMedicineLibrary(medicinesForDisplay(medicines));
       this._hasLoadedSnapshot = true;
       this.setData({
         deviceId: requestDeviceId,
@@ -206,7 +217,7 @@ Page({
         summary,
         hasLoadedSnapshot: true,
         stale: false,
-        carePage: composeLibraryCarePage(device, summary, { catalogOnly: !requestDeviceId }),
+        carePage: composeLibraryCarePage(device, summary),
       });
     } catch (error) {
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
@@ -225,7 +236,13 @@ Page({
   onCarePageAction(event) {
     const detail = event && event.detail ? event.detail : {};
     const payload = detail.payload || {};
-    if (detail.id === "library.retry") return this.load();
+    if (detail.id === "library.retry") {
+      const app = getApp();
+      if (!activeDeviceId() && app && typeof app.refreshDeviceSession === "function") {
+        return Promise.resolve(app.refreshDeviceSession()).then(() => this.load());
+      }
+      return this.load();
+    }
     if (detail.id === "library.all" || detail.id === "library.all.focus") return this.openList();
     if (detail.id === "library.attention"
       || detail.id === "library.attention.more"

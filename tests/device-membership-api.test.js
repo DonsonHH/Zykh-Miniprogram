@@ -31,6 +31,10 @@ test("GET_MY_DEVICES is a strict account-scoped API with normalized authorized d
           role: "caregiver",
           permissions: ["READ_VITALS", "READ_VITALS"],
           service_user_scopes: ["member-1"],
+          service_user_generations: { "member-1": "generation-2" },
+          lastSeenAt: "2026-08-22 10:00:00",
+          lastSeenAtEpochMs: 1787364000000,
+          heartbeatAgeMs: 5000,
         }],
       },
     };
@@ -42,9 +46,23 @@ test("GET_MY_DEVICES is a strict account-scoped API with normalized authorized d
       items: [{
         deviceId: "box-a",
         name: "客厅药箱",
+        online: true,
+        connection: {
+          state: "online",
+          online: true,
+          lastSeenAt: "2026-08-22 10:00:00",
+          lastSeenAtEpochMs: 1787364000000,
+          heartbeatAgeMs: 5000,
+          reason: "药箱已同步",
+        },
+        connectionState: "online",
+        lastSeenAt: "2026-08-22 10:00:00",
+        lastSeenAtEpochMs: 1787364000000,
+        heartbeatAgeMs: 5000,
         role: "CAREGIVER",
         permissions: ["READ_VITALS"],
         serviceUserScopes: ["member-1"],
+        serviceUserGenerations: { "member-1": "generation-2" },
       }],
     });
   } finally {

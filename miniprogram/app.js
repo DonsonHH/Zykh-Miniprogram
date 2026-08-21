@@ -1,8 +1,8 @@
 const api = require("./utils/api");
 const { createDeviceMembershipModule } = require("./modules/deviceMemberships");
+const { projectConnection } = require("./utils/connectionState");
 
 const CLOUD_ENV = "cloud1-d6gv6t2jf3f2c541c";
-const LEGACY_DEFAULT_DEVICE_ID = "zykh-qsm-001";
 
 function loadingDeviceSession() {
   return {
@@ -12,6 +12,10 @@ function loadingDeviceSession() {
     selectedDeviceId: "",
     canPair: false,
     capabilities: {},
+    schemaVersion: "",
+    schemaRevision: "",
+    compatibility: null,
+    connection: projectConnection({}, { loading: true }),
     message: "正在确认当前账号可访问的药箱",
     pairing: { phase: "idle", message: "" },
   };
@@ -51,10 +55,8 @@ App({
       getMyDevicesStrict: api.getMyDevicesStrict,
       redeemDevicePairingCodeStrict: api.redeemDevicePairingCodeStrict,
     });
-    this.globalData.deviceSessionReady = this._deviceMemberships.resolve({
-      savedDeviceId,
-      legacyDefaultDeviceId: LEGACY_DEFAULT_DEVICE_ID,
-    }).then(state => this.applyDeviceSession(state));
+    this.globalData.deviceSessionReady = this._deviceMemberships.resolve({ savedDeviceId })
+      .then(state => this.applyDeviceSession(state));
   },
 
   applyDeviceSession(state = loadingDeviceSession()) {
@@ -63,15 +65,24 @@ App({
     const membershipSelectionIsAuthorized = state.mode === "membership"
       && state.availability === "ready"
       && devices.some(device => String(device && device.deviceId || "").trim() === requestedDeviceId);
-    const legacySelectionIsResolved = state.mode === "legacy"
-      && state.availability === "unsupported"
-      && Boolean(requestedDeviceId);
-    const selectedDeviceId = membershipSelectionIsAuthorized || legacySelectionIsResolved
+    const selectedDeviceId = membershipSelectionIsAuthorized
       ? requestedDeviceId
       : "";
-    const resolvedState = selectedDeviceId === requestedDeviceId
+    const selectedDevice = devices.find(device => String(device && device.deviceId || "").trim() === selectedDeviceId);
+    const resolvedBase = selectedDeviceId === requestedDeviceId
       ? state
       : Object.assign({}, state, { selectedDeviceId: "" });
+    const resolvedState = Object.assign({}, resolvedBase, {
+      connection: selectedDevice && selectedDevice.connection
+        ? selectedDevice.connection
+        : projectConnection({}, {
+          availability: resolvedBase.availability,
+          compatible: resolvedBase.compatibility
+            ? resolvedBase.compatibility.compatible
+            : undefined,
+          reason: resolvedBase.message,
+        }),
+    });
     this.globalData.deviceSession = resolvedState;
     this.globalData.deviceId = selectedDeviceId;
     this.globalData.deviceSessionResolved = true;
@@ -97,10 +108,8 @@ App({
     this.globalData.deviceSessionResolved = false;
     this.globalData.deviceSession = loadingDeviceSession();
     this.globalData.deviceId = "";
-    const ready = this._deviceMemberships.resolve({
-      savedDeviceId,
-      legacyDefaultDeviceId: LEGACY_DEFAULT_DEVICE_ID,
-    }).then(state => this.applyDeviceSession(state));
+    const ready = this._deviceMemberships.resolve({ savedDeviceId })
+      .then(state => this.applyDeviceSession(state));
     this.globalData.deviceSessionReady = ready;
     return ready;
   },

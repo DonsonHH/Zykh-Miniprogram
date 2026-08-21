@@ -63,6 +63,7 @@ function composeRiskCarePage(device = {}, state = {}, options = {}) {
     key: "medication-risks",
     title: "用药风险",
     online: device.online === true,
+    connection: device.connection,
     focus: primary ? {
       eyebrow: primary.checkStatus === "BLOCKED" ? "需要重点关注" : "最近风险核验",
       title: `${primary.personName} · ${primary.medicineName}`,

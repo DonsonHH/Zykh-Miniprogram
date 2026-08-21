@@ -16,6 +16,10 @@ Component({
       type: Boolean,
       value: false,
     },
+    connectionState: {
+      type: String,
+      value: "unavailable",
+    },
     statusText: {
       type: String,
       value: "",

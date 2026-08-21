@@ -151,8 +151,6 @@ test("secondary interaction surfaces expose button, label and selection semantic
 
   for (const [marker, label] of [
     ['bindtap="testVoiceReminder"', "测试药箱语音提醒"],
-    ['bindtap="toggleBindForm"', "更换绑定药箱"],
-    ['bindtap="bindDevice"', "确认切换药箱"],
     ['bindtap="showCommandDetails"', "查看协同日志"],
     ['bindtap="showDeviceDetails"', "返回药箱管理"],
   ]) {
@@ -169,9 +167,9 @@ test("secondary interaction surfaces expose button, label and selection semantic
   const staticMember = openingTag(settings, 'wx:else class="family-member"');
   assert.doesNotMatch(staticMember, /bindtap=|aria-role="button"/);
 
-  const cancelBinding = openingTag(settings, 'aria-label="取消更换药箱"');
-  assert.match(cancelBinding, /bindtap="toggleBindForm"/);
-  assert.match(cancelBinding, /aria-role="button"/);
+  const authorizedDevice = openingTag(settings, 'bindtap="selectAuthorizedDevice"');
+  assert.match(authorizedDevice, /aria-role="button"/);
+  assert.match(authorizedDevice, /aria-selected="\{\{item\.selected\}\}"/);
 
   for (const [filter, label] of [
     ["all", "显示全部药品"],

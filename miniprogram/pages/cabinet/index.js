@@ -98,6 +98,7 @@ function composeCabinetCarePage(device, summary, options = {}) {
     key: "cabinet",
     title: "家庭药箱",
     online: Boolean(device && device.online),
+    connection: device && device.connection,
     focus: {
       eyebrow: stale ? "数据待刷新" : "药箱维护",
       title: attentionCount
@@ -170,6 +171,7 @@ function cabinetErrorCarePage(device = {}) {
     key: "cabinet-error",
     title: "家庭药箱",
     online: Boolean(device.online),
+    connection: device.connection,
     phase: {
       kind: "error",
       message: "药品数据读取失败，当前无法判断仓位是否为空。",

@@ -1,9 +1,16 @@
 const { daysUntil, normalizeExpiryDate } = require("./expiry");
 const { CABINET_SLOT_COUNT } = require("./cabinetSlots");
 const { storageBoxFor } = require("./medicineLibrary");
-const { enrichKnownMedicine, knownMedicineFor } = require("../data/fixedMedicineCatalog");
+const {
+  enrichKnownMedicine,
+  knownMedicineFor,
+} = require("../data/fixedMedicineCatalog");
 const { validateMedicationSafetyEventReadReceipt } = require("../modules/medicationSafetyEvents");
 const { parseTimestamp } = require("./dateTime");
+const {
+  evaluateCompatibility,
+  projectConnection,
+} = require("./connectionState");
 
 const COLLECTIONS = {
   devices: "devices",
@@ -76,17 +83,22 @@ function nowText() {
 
 function emptyDevice(deviceIdOverride = "") {
   const deviceId = firstPresent(deviceIdOverride, appData().deviceId);
+  const connection = projectConnection({}, { loading: true });
   return {
     _id: deviceId,
     deviceId,
     name: "智药康护终端",
-    online: false,
+    online: null,
+    connection,
+    connectionState: connection.state,
     network: "未上报",
     signal: "未上报",
     medicineCount: 0,
     lowStockCount: 0,
     lastVitals: null,
     lastSeenAt: "",
+    lastSeenAtEpochMs: 0,
+    heartbeatAgeMs: null,
     cloudAgent: "未上报",
     localApi: "未上报",
     board: "未上报",
@@ -100,11 +112,10 @@ function parseTime(value) {
 
 function isDeviceOnline(device) {
   if (!device) return false;
-  const lastSeen = parseTime(device.lastSeenAt || device.updatedAt);
-  if (lastSeen) {
-    return Date.now() - lastSeen < 60 * 1000;
+  if (device.connection && device.connection.state) {
+    return device.connection.state === "online";
   }
-  return Boolean(device.online);
+  return projectConnection(device).state === "online";
 }
 
 function firstPresent(...values) {
@@ -233,7 +244,10 @@ function buildHeader(device = {}) {
   const d = new Date();
   const pad = n => String(n).padStart(2, "0");
   const weekdays = ["星期日", "星期一", "星期二", "星期三", "星期四", "星期五", "星期六"];
-  const online = isDeviceOnline(device);
+  const connection = device.connection && device.connection.state
+    ? device.connection
+    : projectConnection(device);
+  const online = connection.state === "online";
   let network = device.network || "未上报";
   if (network === "unknown") network = online ? "已同步" : "待同步";
   if (String(network).indexOf(":down") >= 0) network = online ? "已同步" : "待同步";
@@ -244,7 +258,9 @@ function buildHeader(device = {}) {
     network,
     signal: device.signal || "未上报",
     online,
-    onlineText: online ? "在线" : "离线",
+    connection,
+    connectionState: connection.state,
+    onlineText: online ? "在线" : (connection.state === "stale" ? "等待连接" : "状态待确认"),
   };
 }
 
@@ -252,17 +268,34 @@ function normalizeDevice(data = {}, requestDeviceId = "") {
   const raw = Object.assign(emptyDevice(requestDeviceId), data || {});
   const summary = raw.syncSummary || {};
   const counts = summary.counts || {};
+  const session = appData().deviceSession || {};
+  const compatibility = session.compatibility || (
+    session.schemaRevision || session.schemaVersion
+      ? evaluateCompatibility(session)
+      : { compatible: true }
+  );
+  const connection = projectConnection(raw, {
+    availability: session.availability === "ready" ? "" : session.availability,
+    compatible: compatibility.compatible,
+    reason: compatibility.compatible === false ? compatibility.reason : "",
+  });
   const device = Object.assign(emptyDevice(requestDeviceId), {
     _id: firstPresent(raw._id, raw.deviceId),
     deviceId: firstPresent(raw.deviceId, raw._id, requestDeviceId, appData().deviceId),
     name: firstPresent(raw.name, "智药康护终端"),
-    online: raw.online,
+    online: connection.online,
+    connection,
+    connectionState: connection.state,
     network: firstPresent(raw.network, "未上报"),
     signal: firstPresent(raw.signal, "未上报"),
     medicineCount: Number(firstPresent(raw.medicineCount, counts.medicines, 0)),
     lowStockCount: Number(firstPresent(raw.lowStockCount, 0)),
     lastVitals: raw.lastVitals || null,
     lastSeenAt: firstPresent(raw.lastSeenAt, raw.updatedAt, ""),
+    lastSeenAtEpochMs: Number(firstPresent(raw.lastSeenAtEpochMs, raw.last_seen_at_epoch_ms, 0)) || 0,
+    heartbeatAgeMs: Number.isFinite(Number(firstPresent(raw.heartbeatAgeMs, raw.heartbeat_age_ms, NaN)))
+      ? Number(firstPresent(raw.heartbeatAgeMs, raw.heartbeat_age_ms))
+      : null,
     updatedAt: firstPresent(raw.updatedAt, ""),
     cloudAgent: firstPresent(raw.cloudAgent, raw.agent, "未上报"),
     agentVersion: firstPresent(raw.agentVersion, ""),
@@ -280,25 +313,66 @@ function normalizeDevice(data = {}, requestDeviceId = "") {
       ).slice(0, 60),
     },
   });
-  return Object.assign(device, { online: isDeviceOnline(device) });
+  return device;
 }
 
-function normalizeMedicine(item) {
+function normalizeMedicine(item, options = {}) {
   const raw = item || {};
   const known = enrichKnownMedicine(raw);
   const deviceId = raw.deviceId || appData().deviceId;
-  const slot = normalizeMedicineSlot(raw.hardware_slot, raw.slot, 1);
+  const camelMedicineId = String(raw.medicineId || "").trim();
+  const snakeMedicineId = String(raw.medicine_id || "").trim();
+  if (camelMedicineId && snakeMedicineId && camelMedicineId !== snakeMedicineId) {
+    const error = new Error("medicine identity aliases conflict");
+    error.code = "MEDICINE_IDENTITY_CONFLICT";
+    throw error;
+  }
+  const referenceMedicine = knownMedicineFor({ medicineId: camelMedicineId || snakeMedicineId });
+  const slotValue = firstPresent(
+    raw.legacySlot,
+    raw.legacy_slot,
+    raw.hardware_slot,
+    raw.hardwareSlot,
+    raw.slot,
+    known.fixedCatalogMatch ? known.legacySlot : "",
+    0,
+  );
+  const slotNumber = Number(slotValue);
+  const slot = Number.isInteger(slotNumber) && slotNumber > 0
+    ? slotNumber
+    : (slotValue ? normalizeMedicineSlot(slotValue) : 0);
   const medicineId = String(firstPresent(
-    raw.medicineId,
-    raw.medicine_id,
-    known.fixedCatalogMatch ? known.medicineId : null,
-    raw.traceCode,
-    raw.trace_code,
-    raw.barcode,
-    raw.code,
-    raw._id,
-    `legacy-slot-${slot}`,
+    camelMedicineId,
+    snakeMedicineId,
+    options.strictManifest ? "" : firstPresent(raw.traceCode, raw.trace_code, raw.barcode, raw.code, raw._id),
+    slot ? `legacy-slot-${slot}` : "",
   ) || "").trim();
+  if (options.strictManifest && !medicineId) {
+    const error = new Error("medicine identity is required");
+    error.code = "MEDICINE_ID_REQUIRED";
+    throw error;
+  }
+  const camelStorageBox = String(raw.storageBox || "").trim().toUpperCase();
+  const snakeStorageBox = String(raw.storage_box || "").trim().toUpperCase();
+  if (camelStorageBox && snakeStorageBox && camelStorageBox !== snakeStorageBox) {
+    const error = new Error("medicine storage box aliases conflict");
+    error.code = "MEDICINE_STORAGE_BOX_CONFLICT";
+    throw error;
+  }
+  const manifestStorageBox = camelStorageBox || snakeStorageBox;
+  const validStorageBoxes = new Set(["DAILY", "CARE", "PRESCRIPTION"]);
+  if (options.strictManifest && !validStorageBoxes.has(manifestStorageBox)) {
+    const error = new Error("medicine storage box is invalid");
+    error.code = "MEDICINE_STORAGE_BOX_INVALID";
+    throw error;
+  }
+  if (options.strictManifest
+      && referenceMedicine
+      && referenceMedicine.storageBox !== manifestStorageBox) {
+    const error = new Error("medicine identity and storage box conflict");
+    error.code = "MEDICINE_REFERENCE_CONFLICT";
+    throw error;
+  }
   // Quantity is only a coarse count. Preserve an omitted value and leave all
   // inventory-state interpretation to the capability-aware projection layer.
   const rawQuantity = firstPresent(raw.quantity, raw.stock);
@@ -338,12 +412,20 @@ function normalizeMedicine(item) {
     raw.depletion_confirmation_source,
     "",
   );
-  // The fixed 22-medicine baseline owns the current three-box classification.
-  // Live cloud fields still own stock, expiry, specification and trace data.
-  const fixedReference = known.fixedCatalogMatch ? knownMedicineFor(raw) : null;
-  const box = fixedReference
-    ? storageBoxFor(fixedReference)
-    : storageBoxFor(Object.assign({}, known, raw, { slot }));
+  const authoritativeStorageBox = validStorageBoxes.has(manifestStorageBox)
+    ? manifestStorageBox
+    : "";
+  const box = storageBoxFor(Object.assign({}, known, raw, {
+    medicineId,
+    storageBox: authoritativeStorageBox,
+    slot,
+  })) || { id: "", label: "同步数据异常" };
+  const name = firstPresent(raw.name, known.name, "");
+  if (options.strictManifest && !String(name || "").trim()) {
+    const error = new Error("medicine name is required");
+    error.code = "MEDICINE_NAME_REQUIRED";
+    throw error;
+  }
   return Object.assign({}, known, raw, {
     _id: raw._id || `${deviceId}-medicine-${safeId(medicineId)}`,
     deviceId,
@@ -351,14 +433,11 @@ function normalizeMedicine(item) {
     medicine_id: medicineId,
     slot,
     legacySlot: slot,
-    storageBox: box.id,
-    storage_box: box.id,
+    storageBox: authoritativeStorageBox || box.id,
+    storage_box: authoritativeStorageBox || box.id,
     storageBoxLabel: box.label,
-    name: firstPresent(raw.name, known.name, ""),
+    name,
     manufacturer: firstPresent(raw.manufacturer, raw.producer, known.manufacturer, ""),
-    barcode: firstPresent(raw.barcode, raw.code, known.barcode, ""),
-    traceCode: firstPresent(raw.traceCode, raw.trace_code, raw.barcode, raw.code, known.barcode, ""),
-    trace_code: firstPresent(raw.trace_code, raw.traceCode, raw.barcode, raw.code, known.barcode, ""),
     category: firstPresent(raw.category, known.category, ""),
     tags: Array.isArray(raw.tags) && raw.tags.length ? raw.tags : (known.tags || []),
     contraindications: Array.isArray(raw.contraindications) && raw.contraindications.length
@@ -390,17 +469,16 @@ function normalizeMedicine(item) {
     // 条码与追溯码不可互相回退：它们在板端是不同字段，混用会污染扫码数据。
     barcode: firstPresent(raw.barcode, raw.code),
     traceCode: firstPresent(raw.traceCode, raw.trace_code),
+    trace_code: firstPresent(raw.trace_code, raw.traceCode),
     lowStockLine: Number(firstPresent(raw.lowStockLine, raw.low_stock_line, 0)),
-    category: raw.category || "",
-    tags: raw.tags || [],
     activeIngredients: firstPresent(raw.activeIngredients, raw.active_ingredients, []),
     structuredContraindications: firstPresent(
       raw.structuredContraindications,
       raw.structured_contraindications,
       [],
     ),
-    safetyNote: firstPresent(raw.safetyNote, raw.safety_note),
     updatedAt: raw.updatedAt || "",
+    hasCloudRecord: options.strictManifest ? true : raw.hasCloudRecord !== false,
   });
 }
 
@@ -466,12 +544,34 @@ function uniqueTextList(value) {
 function normalizeAuthorizedDevice(item = {}) {
   const deviceId = firstPresent(item.deviceId, item.device_id, item._id);
   if (!deviceId) return null;
+  const session = appData().deviceSession || {};
+  const compatibility = session.compatibility || (
+    session.schemaRevision || session.schemaVersion
+      ? evaluateCompatibility(session)
+      : { compatible: true }
+  );
+  const connection = projectConnection(item, {
+    compatible: compatibility.compatible,
+    reason: compatibility.compatible === false ? compatibility.reason : "",
+  });
   return {
     deviceId,
     name: firstPresent(item.name, item.displayName, item.display_name, "家庭药箱"),
+    online: connection.online,
+    connection,
+    connectionState: connection.state,
+    lastSeenAt: firstPresent(item.lastSeenAt, item.last_seen_at, item.updatedAt, ""),
+    lastSeenAtEpochMs: Number(firstPresent(item.lastSeenAtEpochMs, item.last_seen_at_epoch_ms, 0)) || 0,
+    heartbeatAgeMs: connection.heartbeatAgeMs,
     role: String(firstPresent(item.role, "VIEWER")).trim().toUpperCase(),
     permissions: uniqueTextList(item.permissions),
     serviceUserScopes: uniqueTextList(firstPresent(item.serviceUserScopes, item.service_user_scopes)),
+    serviceUserGenerations: (() => {
+      const value = firstPresent(item.serviceUserGenerations, item.service_user_generations, {});
+      return value && typeof value === "object" && !Array.isArray(value)
+        ? Object.assign({}, value)
+        : {};
+    })(),
   };
 }
 
@@ -1079,16 +1179,23 @@ function cloudFailToast(err) {
 
 async function getDevice(deviceIdOverride = "") {
   const requestDeviceId = firstPresent(deviceIdOverride, appData().deviceId);
-  try {
-    return await getDeviceStrict(requestDeviceId);
-  } catch (err) {
-    return emptyDevice(requestDeviceId);
-  }
+  return getDeviceStrict(requestDeviceId);
 }
 
 async function getDeviceStrict(deviceIdOverride = "") {
   const requestDeviceId = firstPresent(deviceIdOverride, appData().deviceId);
   const data = await cloudAction("GET_DEVICE", {}, requestDeviceId);
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    const error = new Error("药箱状态暂不可用");
+    error.code = "DEVICE_SNAPSHOT_INVALID";
+    throw error;
+  }
+  const responseDeviceId = String(firstPresent(data.deviceId, data.device_id, data._id, "")).trim();
+  if (!responseDeviceId || responseDeviceId !== String(requestDeviceId)) {
+    const error = new Error("药箱状态返回范围不一致");
+    error.code = "DEVICE_SCOPE_MISMATCH";
+    throw error;
+  }
   return normalizeDevice(data, requestDeviceId);
 }
 
@@ -1101,11 +1208,12 @@ async function getCapabilitiesStrict(deviceIdOverride = "") {
   const capabilities = data.capabilities && typeof data.capabilities === "object" && !Array.isArray(data.capabilities)
     ? data.capabilities
     : {};
-  return {
+  const snapshot = {
     schemaVersion: firstPresent(data.schemaVersion, data.schema_version, ""),
     schemaRevision: firstPresent(data.schemaRevision, data.schema_revision, ""),
     capabilities,
   };
+  return Object.assign(snapshot, { compatibility: evaluateCompatibility(snapshot) });
 }
 
 async function getMyDevicesStrict() {
@@ -1201,13 +1309,84 @@ async function getMedicines(deviceIdOverride = "") {
   }
 }
 
-async function getMedicinesStrict(deviceIdOverride = "") {
-  const requestDeviceId = firstPresent(deviceIdOverride, appData().deviceId);
-  const data = await cloudAction("LIST_MEDICINES", {}, requestDeviceId);
-  if (!Array.isArray(data)) {
-    throw new Error("medicine snapshot unavailable");
+function validateMedicineSnapshotEnvelope(data, requestDeviceId) {
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("medicine manifest unavailable");
   }
-  return data.map(item => normalizeMedicine(Object.assign({ deviceId: requestDeviceId }, item)));
+  const protocol = String(firstPresent(data.boardMedicineSnapshot, data.board_medicine_snapshot, ""));
+  const manifestProtocol = String(data.protocol || "").trim();
+  const kind = String(data.kind || "").trim();
+  const canonicalDigestVersion = String(firstPresent(
+    data.canonicalDigestVersion,
+    data.canonical_digest_version,
+    "",
+  )).trim();
+  const snapshotId = String(firstPresent(data.snapshotId, data.snapshot_id, "")).trim();
+  const revision = Number(firstPresent(data.revision, data.snapshotRevision, data.snapshot_revision, 0));
+  const digest = String(data.digest || "").trim().toLowerCase();
+  const rows = data.rows;
+  const responseDeviceId = String(firstPresent(data.deviceId, data.device_id, "")).trim();
+  if (protocol !== "v1"
+      || manifestProtocol !== "boardMedicineSnapshot:v1"
+      || kind !== "medicines"
+      || canonicalDigestVersion !== "jcs-sha256-v1"
+      || data.snapshotComplete !== true
+      || !snapshotId
+      || !Number.isInteger(revision)
+      || revision < 1
+      || !/^[a-f0-9]{64}$/.test(digest)
+      || !Array.isArray(rows)
+      || Number(data.rowCount) !== rows.length
+      || responseDeviceId !== String(requestDeviceId)) {
+    const error = new Error("medicine manifest is incomplete");
+    error.code = "MEDICINE_SNAPSHOT_INCOMPLETE";
+    throw error;
+  }
+  return {
+    boardMedicineSnapshot: "v1",
+    protocol: manifestProtocol,
+    deviceId: responseDeviceId,
+    kind,
+    snapshotId,
+    revision,
+    digest,
+    canonicalDigestVersion,
+    snapshotComplete: true,
+    rowCount: rows.length,
+    finalizedAt: String(data.finalizedAt || ""),
+    rows,
+  };
+}
+
+async function getMedicineSnapshotStrict(deviceIdOverride = "") {
+  const requestDeviceId = firstPresent(deviceIdOverride, appData().deviceId);
+  const session = appData().deviceSession || {};
+  const compatibility = session.compatibility || (
+    session.schemaRevision || session.schemaVersion
+      ? evaluateCompatibility(session)
+      : null
+  );
+  if (compatibility && compatibility.compatible === false) {
+    const error = new Error(compatibility.reason || "云端版本待升级");
+    error.code = "CLOUD_VERSION_INCOMPATIBLE";
+    throw error;
+  }
+  const data = await cloudAction("GET_MEDICINE_SNAPSHOT", {}, requestDeviceId);
+  const envelope = validateMedicineSnapshotEnvelope(data, requestDeviceId);
+  const rows = envelope.rows.map(item => normalizeMedicine(
+    Object.assign({ deviceId: requestDeviceId }, item),
+    { strictManifest: true },
+  ));
+  if (new Set(rows.map(item => item.medicineId)).size !== rows.length) {
+    const error = new Error("medicine manifest contains duplicate identities");
+    error.code = "MEDICINE_SNAPSHOT_CONFLICT";
+    throw error;
+  }
+  return Object.assign({}, envelope, { rows });
+}
+
+async function getMedicinesStrict(deviceIdOverride = "") {
+  return (await getMedicineSnapshotStrict(deviceIdOverride)).rows;
 }
 
 async function getCabinetSlots(deviceIdOverride = "") {
@@ -1218,140 +1397,6 @@ async function getCabinetSlots(deviceIdOverride = "") {
 async function getCabinetSlotsStrict(deviceIdOverride = "") {
   const medicines = await getMedicinesStrict(deviceIdOverride);
   return buildSlots(medicines);
-}
-
-function buildMedicineCommandPayload(form = {}, baseMedicine = {}) {
-  const base = baseMedicine || {};
-  const input = form || {};
-  if (base.expiryConflict || input.expiryConflict) {
-    throw new Error("medicine expiry aliases conflict");
-  }
-  const source = Object.assign({}, base, input);
-  if (Object.prototype.hasOwnProperty.call(input, "expireDate") && !Object.prototype.hasOwnProperty.call(input, "expire_date")) {
-    source.expire_date = input.expireDate;
-  }
-  if (Object.prototype.hasOwnProperty.call(input, "expire_date") && !Object.prototype.hasOwnProperty.call(input, "expireDate")) {
-    source.expireDate = input.expire_date;
-  }
-  const medicine = normalizeMedicine(source);
-  if (medicine.expiryConflict) {
-    throw new Error("medicine expiry aliases conflict");
-  }
-  if (!Number.isInteger(medicine.quantity) || medicine.quantity < 0) {
-    throw new Error("medicine quantity must be a non-negative integer");
-  }
-  if (!Number.isInteger(medicine.lowStockLine) || medicine.lowStockLine < 0) {
-    throw new Error("medicine low stock line must be a non-negative integer");
-  }
-  const existing = normalizeMedicine(Object.assign({}, base, { deviceId: medicine.deviceId }));
-  const isExistingMedicine = Boolean(existing.name);
-  // Newer board workers treat the nested patch as the sole source of updates
-  // for an existing physical slot. Keep the complete root payload for older
-  // workers, but mirror every *changed* board-owned field into that patch.
-  // Barcode and trace code deliberately have separate fallback chains.
-  const barcode = firstPresent(
-    input.barcode,
-    input.code,
-    base.barcode,
-    base.code,
-  );
-  const traceCode = firstPresent(
-    input.traceCode,
-    input.trace_code,
-    base.traceCode,
-    base.trace_code,
-  );
-  const category = firstPresent(input.category, base.category, medicine.category, "家庭常用");
-  const unit = firstPresent(input.unit, base.unit, medicine.unit, "盒");
-  const requestedInventoryState = String(firstPresent(
-    input.inventoryState,
-    input.inventory_state,
-    "",
-  )).trim().toUpperCase();
-  if (requestedInventoryState && !["STOCKED", "DEPLETED", "UNKNOWN"].includes(requestedInventoryState)) {
-    throw new Error("unsupported medicine inventory state");
-  }
-  const patch = {};
-  const changed = (nextValue, currentValue) => !isExistingMedicine || String(nextValue) !== String(currentValue);
-  const boardFieldChanged = (nextValue, currentValue) => (
-    isExistingMedicine && String(nextValue) !== String(currentValue)
-  );
-  if (changed(medicine.name, existing.name)) patch.name = medicine.name;
-  if (changed(medicine.spec, existing.spec)) patch.spec = medicine.spec;
-  if (boardFieldChanged(barcode, existing.barcode)) {
-    patch.barcode = barcode;
-    patch.code = barcode;
-  }
-  if (boardFieldChanged(traceCode, existing.traceCode)) {
-    patch.traceCode = traceCode;
-    patch.trace_code = traceCode;
-  }
-  if (boardFieldChanged(category, existing.category)) patch.category = category;
-  if (boardFieldChanged(unit, existing.unit)) patch.unit = unit;
-  if (changed(medicine.quantity, existing.quantity)) patch.quantity = medicine.quantity;
-  if (changed(medicine.expireDate, existing.expireDate)) {
-    patch.expireDate = medicine.expireDate;
-    patch.expire_date = medicine.expireDate;
-  }
-  if (changed(medicine.expiryPrecision, existing.expiryPrecision)) {
-    patch.expiryPrecision = medicine.expiryPrecision;
-  }
-  if (changed(medicine.lowStockLine, existing.lowStockLine)) {
-    patch.lowStockLine = medicine.lowStockLine;
-    patch.low_stock_line = medicine.lowStockLine;
-  }
-  if (requestedInventoryState) {
-    patch.inventoryState = requestedInventoryState;
-    patch.inventory_state = requestedInventoryState;
-  }
-  const payload = {
-    schemaVersion: 2,
-    operation: "patch",
-    slot: medicine.slot,
-    hardware_slot: medicine.slot,
-    name: medicine.name,
-    spec: medicine.spec,
-    quantity: medicine.quantity,
-    stock: medicine.quantity,
-    expireDate: medicine.expireDate,
-    expire_date: medicine.expireDate,
-    expiryPrecision: medicine.expiryPrecision,
-    expiry_precision: medicine.expiryPrecision,
-    lowStockLine: medicine.lowStockLine,
-    low_stock_line: medicine.lowStockLine,
-    patch,
-  };
-  if (requestedInventoryState) {
-    payload.inventoryState = requestedInventoryState;
-    payload.inventory_state = requestedInventoryState;
-  }
-  if (barcode) {
-    payload.barcode = barcode;
-    payload.code = barcode;
-  }
-  if (traceCode) {
-    payload.traceCode = traceCode;
-    payload.trace_code = traceCode;
-  }
-  payload.category = category;
-  payload.unit = unit;
-  return { medicine, payload };
-}
-
-async function saveMedicine(form, baseMedicine = {}) {
-  const { deviceId } = appData();
-  const slot = normalizeMedicineSlot(form && form.slot);
-  // 真实板端同步器会读取命令顶层字段。因此在提交前强制取一次当前仓位快照，
-  // 让条码、分类、单位等板端字段随命令完整回传；读取失败时宁可拒绝提交，
-  // 不能用空数组降级后覆盖一个已有仓位。
-  const current = (await getMedicinesStrict(deviceId)).find(item => item.slot === slot) || {};
-  const { medicine, payload } = buildMedicineCommandPayload(
-    Object.assign({}, form, { deviceId, updatedAt: nowText() }),
-    Object.assign({}, baseMedicine || {}, current),
-  );
-  const requestId = `medicine-${safeId(deviceId)}-${medicine.slot}-${Date.now()}`;
-  const command = await addCommand("UPSERT_MEDICINE", payload, { requestId, deviceId });
-  return { medicine, command };
 }
 
 async function getLatestVitals(deviceIdOverride = "") {
@@ -1467,8 +1512,22 @@ async function getInquiryDetail(record = {}, options = {}) {
 }
 
 async function addCommand(type, payload = {}, options = {}) {
-  if (String(type || "").trim().toUpperCase() === "OPEN_CABINET") {
-    throw new Error("remote cabinet opening is not available in the caregiver mini program");
+  const normalizedType = String(type || "").trim().toUpperCase();
+  if (["OPEN_CABINET", "DISPENSE", "UPSERT_MEDICINE"].includes(normalizedType)
+      || normalizedType.indexOf("LIGHT") >= 0) {
+    const error = new Error("this physical medicine action is not available remotely");
+    error.code = "REMOTE_MEDICINE_ACTION_FORBIDDEN";
+    throw error;
+  }
+  const session = appData().deviceSession || {};
+  const capabilities = session.capabilities || {};
+  const remoteCommands = String(
+    capabilities.remoteCommands || capabilities.remote_commands || "",
+  ).trim().toLowerCase();
+  if (remoteCommands !== "v1" && remoteCommands !== "1") {
+    const error = new Error("remote commands are not enabled by the current cloud release");
+    error.code = "REMOTE_COMMANDS_DISABLED";
+    throw error;
   }
   const requestId = options.requestId || payload.request_id || payload.requestId || "";
   const result = await cloudAction("CREATE_COMMAND", { type, payload, requestId }, options.deviceId);
@@ -1525,35 +1584,7 @@ async function requestMedicationReminder(plan = {}, extra = {}) {
 
 async function getSnapshot(options = {}) {
   const requestDeviceId = firstPresent(options.deviceId, appData().deviceId);
-  const inquiryLimit = Math.min(Number(options.inquiryLimit) || 30, 60);
-  const includeMessages = options.includeInquiryMessages === true;
-  try {
-    return await getSnapshotStrict(Object.assign({}, options, { deviceId: requestDeviceId }));
-  } catch (err) {
-    const [device, medicines, latestVitals, records, commands, inquiries] = await Promise.all([
-      getDevice(requestDeviceId),
-      getMedicines(requestDeviceId),
-      getLatestVitals(requestDeviceId),
-      getRecentRecords(50, requestDeviceId),
-      getRecentCommands(50, requestDeviceId),
-      getRecentInquiries(inquiryLimit, { deviceId: requestDeviceId }),
-    ]);
-    const summary = (device && device.syncSummary) || {};
-    return {
-      device,
-      medicines,
-      latestVitals,
-      records,
-      commands,
-      serviceUsers: summary.serviceUsers || [],
-      plans: summary.plans || [],
-      inquiries: mergeInquirySources(
-        compactInquiryTransportRows(summary.recentInquiries || [], requestDeviceId),
-        inquiries,
-      ),
-      compatibilityMode: true,
-    };
-  }
+  return getSnapshotStrict(Object.assign({}, options, { deviceId: requestDeviceId }));
 }
 
 async function getSnapshotStrict(options = {}) {
@@ -1590,7 +1621,6 @@ module.exports = {
   shouldShowPlanForServiceUsers,
   medicineDocId,
   buildSlots,
-  buildMedicineCommandPayload,
   normalizeMedicine,
   normalizeVitals,
   normalizeInquiryRecord,
@@ -1620,10 +1650,10 @@ module.exports = {
   getMedicationSafetyEventDetail,
   markMedicationSafetyEventRead,
   getMedicines,
+  getMedicineSnapshotStrict,
   getMedicinesStrict,
   getCabinetSlots,
   getCabinetSlotsStrict,
-  saveMedicine,
   getLatestVitals,
   getLatestVitalsStrict,
   getRecentVitals,

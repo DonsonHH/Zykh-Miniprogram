@@ -81,7 +81,7 @@
   color: #172033;
   font-size: 30rpx;
   font-weight: 900;
-  letter-spacing: -0.5rpx;
+  letter-spacing: 0;
   line-height: 1.12;
 }
 
@@ -118,8 +118,31 @@
   background: #effcf7;
 }
 
+.app-header__status.is-loading,
+.app-header__status.is-unavailable,
+.app-header__status.is-unpaired,
+.app-header__status.is-incompatible {
+  border-color: #d7e1ee;
+  background: #f7f9fc;
+}
+
+.app-header__status.is-incompatible {
+  border-color: #c9dbf7;
+  background: #eef5ff;
+}
+
 .is-online .app-header__dot {
   background: #0f9f8f;
+}
+
+.is-loading .app-header__dot,
+.is-unavailable .app-header__dot,
+.is-unpaired .app-header__dot {
+  background: #8290a3;
+}
+
+.is-incompatible .app-header__dot {
+  background: #2563eb;
 }
 
 .app-header__status-title,
@@ -141,6 +164,16 @@
 
 .is-online .app-header__status-title {
   color: #087c68;
+}
+
+.is-loading .app-header__status-title,
+.is-unavailable .app-header__status-title,
+.is-unpaired .app-header__status-title {
+  color: #536174;
+}
+
+.is-incompatible .app-header__status-title {
+  color: #2457a6;
 }
 
 .app-header__status-hint {

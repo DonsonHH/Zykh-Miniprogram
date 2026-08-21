@@ -78,11 +78,14 @@
               hover-stay-time="80"
               aria-role="button"
               aria-selected="{{item.selected}}"
-              aria-label="{{'选择' + item.name + '，药箱编号' + item.deviceId + (item.selected ? '，当前已选择' : '')}}"
+              aria-label="{{'选择' + item.name + '，' + item.statusText + '，' + item.statusHint + (item.selected ? '，当前已选择' : '')}}"
             >
               <view class="authorized-device-row__copy">
-                <view class="authorized-device-row__name">{{item.name || '家庭药箱'}}</view>
-                <view class="authorized-device-row__meta">{{item.deviceId}}<text wx:if="{{item.role}}"> · {{item.role}}</text></view>
+                <view class="authorized-device-row__top">
+                  <view class="authorized-device-row__name">{{item.name || '家庭药箱'}}</view>
+                  <view class="authorized-device-row__status is-{{item.connectionState}}">{{item.statusText}}</view>
+                </view>
+                <view class="authorized-device-row__meta">{{item.statusHint}}<text wx:if="{{item.role}}"> · {{item.role}}</text></view>
               </view>
               <view class="authorized-device-row__state">{{item.selected ? '当前' : '选择'}}</view>
             </view>
@@ -120,21 +123,6 @@
             aria-role="button"
             aria-label="重新读取授权药箱"
           >重新读取授权药箱</view>
-        </view>
-
-        <view wx:elif="{{deviceSessionMode === 'legacy' && deviceSessionAvailability === 'unsupported'}}" class="device-access-section">
-          <view class="device-access-title">旧版云端：切换药箱编号</view>
-          <view class="device-access-warning">手动切换只改变当前读取的药箱编号，不代表账号已绑定。</view>
-          <view class="device-detail-actions">
-            <view class="device-action" bindtap="toggleBindForm" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="更换绑定药箱" aria-expanded="{{showBindForm}}">更换药箱编号</view>
-          </view>
-          <view wx:if="{{showBindForm}}" class="device-bind-panel">
-            <input value="{{bindValue}}" bindinput="onBindInput" placeholder="输入旧版药箱编号" aria-label="旧版药箱编号" />
-            <view class="device-bind-panel__actions">
-              <view class="device-action device-action--primary" bindtap="bindDevice" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="确认切换药箱">确认切换</view>
-              <view class="device-action" bindtap="toggleBindForm" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="取消更换药箱">取消</view>
-            </view>
-          </view>
         </view>
 
         <view wx:else class="device-access-section">

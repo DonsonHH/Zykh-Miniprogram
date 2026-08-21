@@ -1,4 +1,5 @@
 const crypto = require("crypto");
+const { generationMap } = require("./serviceUserIdentity");
 
 function textList(value) {
   return Array.isArray(value)
@@ -100,15 +101,27 @@ function createMembershipModule({ db, collections, nowText, nowEpochMs = () => D
     const items = [];
     for (const [deviceId, membership] of uniqueMemberships) {
       const device = await documentOrNull(db.collection(collections.devices), deviceId);
+      const lastSeenAtEpochMs = Number(device && device.lastSeenAtEpochMs) || 0;
+      const heartbeatAgeMs = lastSeenAtEpochMs > 0
+        ? Math.max(0, Number(nowEpochMs()) - lastSeenAtEpochMs)
+        : null;
       items.push({
         deviceId,
         name: String((device && (device.name || device.displayName)) || "家庭药箱"),
-        online: Boolean(device && device.online),
+        online: heartbeatAgeMs === null ? null : heartbeatAgeMs < 60 * 1000,
         lastSeenAt: String((device && (device.lastSeenAt || device.updatedAt)) || ""),
+        lastSeenAtEpochMs,
+        heartbeatAgeMs,
+        connectionState: heartbeatAgeMs === null
+          ? "unavailable"
+          : (heartbeatAgeMs < 60 * 1000 ? "online" : "stale"),
         role: String(membership.role || "VIEWER").toUpperCase(),
         permissions: textList(membership.permissions),
         serviceUserScopes: textList(
           membership.service_user_scopes || membership.serviceUserScopes,
+        ),
+        serviceUserGenerations: generationMap(
+          membership.service_user_generations || membership.serviceUserGenerations,
         ),
       });
     }
@@ -427,6 +440,9 @@ function createMembershipModule({ db, collections, nowText, nowEpochMs = () => D
       openid: normalizedOpenId,
       permissions: textList(membership.permissions),
       service_user_scopes: scopes,
+      service_user_generations: generationMap(
+        membership.service_user_generations || membership.serviceUserGenerations,
+      ),
     });
   }
 

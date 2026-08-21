@@ -4,6 +4,7 @@ const vm = require("node:vm");
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
+const connectionState = require("../miniprogram/utils/connectionState");
 const appPath = path.join(__dirname, "../miniprogram/app.js");
 
 function deferred() {
@@ -23,6 +24,7 @@ function loadApp({ module, savedDeviceId = "cached-box" } = {}) {
       if (request.includes("deviceMemberships")) {
         return { createDeviceMembershipModule: () => module };
       }
+      if (request.includes("connectionState")) return connectionState;
       return {
         getCapabilitiesStrict() {},
         getMyDevicesStrict() {},
@@ -40,7 +42,7 @@ function loadApp({ module, savedDeviceId = "cached-box" } = {}) {
   return { app: definition, storage, cloudInit };
 }
 
-test("cold start exposes no medication box until account access has been resolved", async () => {
+test("cold start exposes no device until account access resolves", async () => {
   const pending = deferred();
   const resolveCalls = [];
   const { app, storage, cloudInit } = loadApp({
@@ -51,97 +53,74 @@ test("cold start exposes no medication box until account access has been resolve
       },
     },
   });
-
   app.onLaunch();
-
   assert.equal(app.globalData.deviceId, "");
+  assert.equal(app.globalData.deviceSession.connection.state, "loading");
   assert.equal(app.globalData.deviceSessionResolved, false);
   assert.equal(cloudInit.length, 1);
-  assert.equal(resolveCalls[0].savedDeviceId, "cached-box");
+  assert.deepEqual(Object.keys(resolveCalls[0]), ["savedDeviceId"]);
 
   pending.resolve({
     mode: "membership",
     availability: "ready",
     selectedDeviceId: "authorized-box",
-    devices: [{ deviceId: "authorized-box" }],
-    capabilities: { caregiverMembership: "v1" },
+    devices: [{
+      deviceId: "authorized-box",
+      connection: connectionState.projectConnection({ heartbeatAgeMs: 1000 }),
+    }],
+    compatibility: { compatible: true },
   });
   await app.waitForDeviceSession();
-
   assert.equal(app.globalData.deviceId, "authorized-box");
-  assert.equal(app.globalData.deviceSessionResolved, true);
+  assert.equal(app.globalData.deviceSession.connection.state, "online");
   assert.equal(storage.get("deviceId"), "authorized-box");
 });
 
-test("legacy default is restored only after a successful capability negotiation", async () => {
-  const { app } = loadApp({
-    savedDeviceId: "",
-    module: {
-      async resolve(options) {
-        assert.equal(options.legacyDefaultDeviceId, "zykh-qsm-001");
-        return {
-          mode: "legacy",
-          availability: "unsupported",
-          selectedDeviceId: options.legacyDefaultDeviceId,
-          devices: [],
-          capabilities: {},
-        };
-      },
-    },
-  });
-
-  app.onLaunch();
-  assert.equal(app.globalData.deviceId, "");
-  await app.waitForDeviceSession();
-  assert.equal(app.globalData.deviceId, "zykh-qsm-001");
-});
-
-test("an account with no membership clears the previously selected device", async () => {
+test("incompatible cloud clears cached scope and remains explicit", async () => {
   const { app, storage } = loadApp({
     module: {
       async resolve() {
         return {
           mode: "membership",
-          availability: "unpaired",
-          selectedDeviceId: "",
+          availability: "incompatible",
+          selectedDeviceId: "cached-box",
           devices: [],
-          canPair: true,
-          capabilities: { caregiverMembership: "v1", devicePairing: "v1" },
+          compatibility: { compatible: false, reason: "云端版本待升级" },
+          message: "云端版本待升级",
         };
       },
     },
   });
-
   app.onLaunch();
   await app.waitForDeviceSession();
-
   assert.equal(app.globalData.deviceId, "");
+  assert.equal(app.globalData.deviceSession.connection.state, "incompatible");
   assert.equal(storage.has("deviceId"), false);
 });
 
-test("app scope stays empty when a non-ready membership state carries stale selection fields", async () => {
-  const { app, storage } = loadApp({
-    module: {
-      async resolve() {
-        return {
-          mode: "membership",
-          availability: "error",
-          selectedDeviceId: "stale-box",
-          devices: [{ deviceId: "stale-box" }],
-          capabilities: { caregiverMembership: "v1" },
-        };
+test("unpaired and other non-ready membership states cannot retain stale selection", async () => {
+  for (const availability of ["unpaired", "error", "forbidden", "pairing-unavailable"]) {
+    const { app, storage } = loadApp({
+      module: {
+        async resolve() {
+          return {
+            mode: "membership",
+            availability,
+            selectedDeviceId: "stale-box",
+            devices: [{ deviceId: "stale-box" }],
+            compatibility: { compatible: true },
+          };
+        },
       },
-    },
-  });
-
-  app.onLaunch();
-  await app.waitForDeviceSession();
-
-  assert.equal(app.globalData.deviceId, "");
-  assert.equal(storage.has("deviceId"), false);
+    });
+    app.onLaunch();
+    await app.waitForDeviceSession();
+    assert.equal(app.globalData.deviceId, "", availability);
+    assert.equal(storage.has("deviceId"), false, availability);
+  }
 });
 
-test("selecting and pairing delegate to the membership policy before changing global scope", async () => {
+test("selecting and redeeming delegate to membership policy before scope changes", async () => {
   const selections = [];
   const redemptions = [];
   const initialState = {
@@ -149,7 +128,7 @@ test("selecting and pairing delegate to the membership policy before changing gl
     availability: "ready",
     selectedDeviceId: "box-a",
     devices: [{ deviceId: "box-a" }, { deviceId: "box-b" }],
-    capabilities: { caregiverMembership: "v1", devicePairing: "v1" },
+    compatibility: { compatible: true },
   };
   const { app } = loadApp({
     module: {
@@ -161,14 +140,12 @@ test("selecting and pairing delegate to the membership policy before changing gl
       async redeem(input) {
         redemptions.push(input);
         return Object.assign({}, input.previousState, {
-          availability: "ready",
           devices: [{ deviceId: "box-a" }, { deviceId: "box-b" }, { deviceId: "box-c" }],
           selectedDeviceId: "box-c",
         });
       },
     },
   });
-
   app.onLaunch();
   await app.waitForDeviceSession();
   app.selectAuthorizedDevice("box-b");
@@ -177,11 +154,10 @@ test("selecting and pairing delegate to the membership policy before changing gl
 
   await app.redeemDevicePairingCode("secret-once");
   assert.equal(redemptions[0].pairingCode, "secret-once");
-  assert.equal(redemptions[0].previousState.selectedDeviceId, "box-b");
   assert.equal(app.globalData.deviceId, "box-c");
 });
 
-test("page activation waits for an unresolved device session but remains synchronous after resolution", async () => {
+test("page activation waits for session resolution and is synchronous afterwards", async () => {
   const previousGetApp = global.getApp;
   const pending = deferred();
   let calls = 0;
@@ -190,7 +166,6 @@ test("page activation waits for an unresolved device session but remains synchro
     waitForDeviceSession: () => pending.promise,
   };
   global.getApp = () => app;
-
   try {
     delete require.cache[require.resolve("../miniprogram/utils/deviceSession")];
     const { runAfterDeviceSessionReady } = require("../miniprogram/utils/deviceSession");
@@ -199,10 +174,8 @@ test("page activation waits for an unresolved device session but remains synchro
     pending.resolve({ availability: "ready" });
     assert.equal(await result, "ready");
     assert.equal(calls, 1);
-
     app.globalData.deviceSessionResolved = true;
-    const synchronous = runAfterDeviceSessionReady(() => { calls += 1; return "now"; });
-    assert.equal(synchronous, "now");
+    assert.equal(runAfterDeviceSessionReady(() => { calls += 1; return "now"; }), "now");
     assert.equal(calls, 2);
   } finally {
     global.getApp = previousGetApp;

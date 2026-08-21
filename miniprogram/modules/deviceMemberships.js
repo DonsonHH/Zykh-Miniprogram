@@ -1,3 +1,8 @@
+const {
+  evaluateCompatibility,
+  projectConnection,
+} = require("../utils/connectionState");
+
 function text(value) {
   return String(value === undefined || value === null ? "" : value).trim();
 }
@@ -16,6 +21,9 @@ function stateFor(values = {}) {
     selectedDeviceId: "",
     canPair: false,
     capabilities: {},
+    schemaVersion: "",
+    schemaRevision: "",
+    compatibility: null,
     message: "",
     error: null,
     pairing: { phase: "idle", message: "" },
@@ -28,21 +36,33 @@ function textList(value) {
     : [];
 }
 
-function normalizeDevice(value = {}) {
+function normalizeDevice(value = {}, compatibility = { compatible: true }) {
   const deviceId = text(value.deviceId || value.device_id || value._id);
   if (!deviceId) return null;
+  const connection = projectConnection(value, {
+    compatible: compatibility.compatible,
+    reason: compatibility.compatible === false ? compatibility.reason : "",
+  });
   return {
     deviceId,
     name: text(value.name || value.displayName) || "家庭药箱",
-    online: value.online === true,
+    online: connection.online,
+    connection,
+    connectionState: connection.state,
     lastSeenAt: text(value.lastSeenAt || value.last_seen_at || value.updatedAt),
+    lastSeenAtEpochMs: Number(value.lastSeenAtEpochMs || value.last_seen_at_epoch_ms) || 0,
+    heartbeatAgeMs: connection.heartbeatAgeMs,
     role: (text(value.role) || "VIEWER").toUpperCase(),
     permissions: textList(value.permissions),
     serviceUserScopes: textList(value.serviceUserScopes || value.service_user_scopes),
+    serviceUserGenerations: Object.assign(
+      {},
+      value.serviceUserGenerations || value.service_user_generations || {},
+    ),
   };
 }
 
-function authorizedDevicesFrom(response) {
+function authorizedDevicesFrom(response, compatibility = { compatible: true }) {
   const rows = Array.isArray(response)
     ? response
     : (response && Object.prototype.hasOwnProperty.call(response, "items") ? response.items : null);
@@ -51,7 +71,7 @@ function authorizedDevicesFrom(response) {
     error.code = "DEVICE_LIST_INVALID";
     throw error;
   }
-  const devices = rows.map(normalizeDevice);
+  const devices = rows.map(value => normalizeDevice(value, compatibility));
   if (devices.some(device => !device)) {
     const error = new Error("authorized device row is missing deviceId");
     error.code = "DEVICE_LIST_INVALID";
@@ -80,13 +100,18 @@ function createDeviceMembershipModule(gateway = {}) {
         });
       }
       const capabilities = capabilitySnapshot && capabilitySnapshot.capabilities || {};
-      if (!supportsV1(capabilities.caregiverMembership || capabilities.caregiver_membership)) {
+      const compatibility = capabilitySnapshot.compatibility || evaluateCompatibility(capabilitySnapshot);
+      const schemaVersion = capabilitySnapshot.schemaVersion || capabilitySnapshot.schema_version || "";
+      const schemaRevision = capabilitySnapshot.schemaRevision || capabilitySnapshot.schema_revision || "";
+      if (!compatibility.compatible) {
         return stateFor({
-          mode: "legacy",
-          availability: "unsupported",
-          selectedDeviceId: text(options.savedDeviceId) || text(options.legacyDefaultDeviceId),
+          mode: "membership",
+          availability: "incompatible",
           capabilities,
-          message: "当前云端版本尚未支持账号与药箱配对",
+          schemaVersion,
+          schemaRevision,
+          compatibility,
+          message: compatibility.reason || "云端版本待升级",
         });
       }
       const canPair = supportsV1(capabilities.devicePairing || capabilities.device_pairing);
@@ -101,6 +126,9 @@ function createDeviceMembershipModule(gateway = {}) {
             availability: canPair ? "unpaired" : "pairing-unavailable",
             canPair,
             capabilities,
+            schemaVersion,
+            schemaRevision,
+            compatibility,
             message: canPair
               ? "当前微信账号尚未配对药箱，请输入一次性配对码"
               : "当前账号尚未获得药箱权限，请联系管理员",
@@ -118,6 +146,9 @@ function createDeviceMembershipModule(gateway = {}) {
             availability: "forbidden",
             canPair,
             capabilities,
+            schemaVersion,
+            schemaRevision,
+            compatibility,
             message: "当前微信账号无权查看已选药箱，可重新配对或联系管理员",
             error,
           });
@@ -127,19 +158,25 @@ function createDeviceMembershipModule(gateway = {}) {
           availability: "error",
           canPair,
           capabilities,
+          schemaVersion,
+          schemaRevision,
+          compatibility,
           message: "授权药箱列表读取失败，请稍后重试",
           error,
         });
       }
       let devices;
       try {
-        devices = authorizedDevicesFrom(response);
+        devices = authorizedDevicesFrom(response, compatibility);
       } catch (error) {
         return stateFor({
           mode: "membership",
           availability: "error",
           canPair,
           capabilities,
+          schemaVersion,
+          schemaRevision,
+          compatibility,
           message: "授权药箱列表格式异常，请稍后重试",
           error,
         });
@@ -153,6 +190,9 @@ function createDeviceMembershipModule(gateway = {}) {
         selectedDeviceId: selected ? selected.deviceId : "",
         canPair,
         capabilities,
+        schemaVersion,
+        schemaRevision,
+        compatibility,
         message: devices.length
           ? ""
           : (canPair ? "当前微信账号尚未配对药箱" : "当前云端未开放自助配对，请联系管理员"),
@@ -186,7 +226,10 @@ function createDeviceMembershipModule(gateway = {}) {
       const redeemedDeviceId = text(result && (result.deviceId || result.device_id));
       let devices;
       try {
-        devices = authorizedDevicesFrom(await gateway.getMyDevicesStrict());
+        devices = authorizedDevicesFrom(
+          await gateway.getMyDevicesStrict(),
+          previousState.compatibility || { compatible: true },
+        );
       } catch (error) {
         return stateFor({
           mode: "membership",
@@ -195,6 +238,9 @@ function createDeviceMembershipModule(gateway = {}) {
           selectedDeviceId: "",
           canPair: previousState.canPair === true,
           capabilities: previousState.capabilities || {},
+          schemaVersion: previousState.schemaVersion || "",
+          schemaRevision: previousState.schemaRevision || "",
+          compatibility: previousState.compatibility || null,
           error,
           message: "配对已提交，但授权药箱列表暂时无法确认",
           pairing: { phase: "error", message: "请重试读取授权药箱" },
@@ -208,6 +254,9 @@ function createDeviceMembershipModule(gateway = {}) {
         selectedDeviceId: selected ? selected.deviceId : "",
         canPair: previousState.canPair === true,
         capabilities: previousState.capabilities || {},
+        schemaVersion: previousState.schemaVersion || "",
+        schemaRevision: previousState.schemaRevision || "",
+        compatibility: previousState.compatibility || null,
         message: selected ? "" : "配对结果尚未出现在授权药箱列表中",
       });
     },
@@ -216,8 +265,7 @@ function createDeviceMembershipModule(gateway = {}) {
       const requestedDeviceId = text(deviceId);
       const devices = Array.isArray(state.devices) ? state.devices : [];
       const selectableMembership = state.mode === "membership" && state.availability === "ready";
-      const selectableLegacy = state.mode === "legacy" && state.availability === "unsupported";
-      if (!selectableMembership && !selectableLegacy) {
+      if (!selectableMembership) {
         const error = new Error("device selection is unavailable until cloud access is resolved");
         error.code = "DEVICE_SELECTION_UNAVAILABLE";
         throw error;

@@ -3,6 +3,7 @@
     title="计划用药提醒"
     subtitle="{{headerSubtitle}}"
     online="{{deviceOnline}}"
+    connection-state="{{deviceConnectionState}}"
     show-status="true"
   />
 

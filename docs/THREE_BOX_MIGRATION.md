@@ -1,141 +1,119 @@
-# 三盒药库与板端同步迁移说明
+# 三柜药库与板端同步迁移说明
 
-本文档对应 CloudBase schema revision `3.0-three-box-library`。目标是把旧版“23 个独立药仓 + 电控出药”迁移为“终端溯源码入库 + 三个分类药盒 + 家庭药品管理”。
+本文档对应 CloudBase schema revision `3.0-three-box-library`。Station 是药品事实源；CloudBase 保存版本化快照；小程序是家庭照护端只读投影。
 
-## 1. 新的职责边界
+## 1. 职责边界
 
 ```text
 QSM368 Station
-  扫描溯源码、建立药品档案、AI 问询、风险核验、现场用药确认
-        ↓ 主动上传
-CloudBase api 云函数
-  设备鉴权、快照存储、账号授权、风险与记录查询
-        ↓
+  溯源码入库、23 种稳定药品身份、三柜分类、现场余量和有效期
+        ↓ 主动上传并 finalize
+CloudBase api
+  逐设备认证、心跳、fencing 会话、不可变行和 authoritative manifest
+        ↓ 账号授权读取
 微信小程序
-  家属查看、提醒、药品维护提示、问询摘要、用药风险与照护记录
+  家属查看药库、同步状态和后续照护信息
 ```
 
-小程序不再提供仓位编辑、开柜、舵机控制或自动出药。药品扫描入库以 Station 本地数据库为事实源。
+小程序不编辑药品、不发送 `UPSERT_MEDICINE`、不维护物理柜号，也不提供开柜、出药或点灯入口。
 
 ## 2. 三个药柜
 
-| `storageBox` | 界面名称 | 内容 |
-| --- | --- | --- |
-| `DAILY` | 日常高频内服 | 感冒、发热、咳嗽、过敏与胃肠不适 |
-| `CARE` | 外用消毒护理 | 消毒、伤口、皮肤、鼻部与局部疼痛 |
-| `PRESCRIPTION` | 慢病处方储备 | 慢病、处方、固定用药与低频储备 |
+| `storageBox` | 小程序名称 | 当前数量 |
+| --- | --- | ---: |
+| `DAILY` | 日常用药 | 9 |
+| `CARE` | 外用护理 | 8 |
+| `PRESCRIPTION` | 慢病处方 | 6 |
 
-旧仓位数据的一次性默认映射如下：
+总计 23 种。完整身份与 S03/S09/S13 特殊映射见 [BOARD_23_MEDICINES.md](BOARD_23_MEDICINES.md)。
 
-| 新药盒 | 旧仓号 |
-| --- | --- |
-| 日常高频内服 | 1、3、5、7、8、11、12、13、23 |
-| 外用消毒护理 | 10、15、16、17、18、19、20、22 |
-| 慢病处方储备 | 2、4、6、14、21 |
+`storageBox` 是跨端分类码，不等于物理柜号。Station 本地 `cabinet_id` 不上传 CloudBase。
 
-该映射只用于迁移当前保留的 22 条药品记录。迁移后必须把结果写入 `storage_box`，不得继续按旧仓号决定药品位置。
+## 3. 药品行合同
 
-22 种药品的准确名称、厂家和柜内顺序见 [FIXED_22_MEDICINES.md](FIXED_22_MEDICINES.md)。
-
-## 3. Station 数据库迁移
-
-建议在本地 `medicines` 表增加并回填：
-
-```text
-medicine_id       TEXT NOT NULL   稳定药品记录 ID
-storage_box       TEXT NOT NULL   DAILY / CARE / PRESCRIPTION
-trace_code        TEXT            溯源码
-inventory_state   TEXT            STOCKED / DEPLETED / UNKNOWN
-expire_date       TEXT            YYYY-MM 或 YYYY-MM-DD
-expiry_precision  TEXT            month / day
-```
-
-规则：
-
-1. `medicine_id` 一经生成不得随名称、有效期或药盒变化而改变。
-2. 新扫描记录应使用本地 UUID 或数据库稳定主键生成 `medicine_id`，不要用药盒位置作为身份。
-3. 旧记录可先使用 `legacy-slot-<旧仓号>`，完成迁移后仍保持该 ID 稳定。
-4. `trace_code` 用于追溯和识别；除非业务确认唯一，不应代替数据库主键。
-5. `inventory_state` 是余量事实。不要仅根据 `quantity` 推导缺药或低余量。
-
-## 4. 药品上传契约
-
-Station 使用 `UPLOAD_MEDICINES` 或快照批次接口上传。每条记录至少包含：
+每条 Station 药品行至少包含：
 
 ```json
 {
-  "medicineId": "med-8d3d4f2a",
-  "name": "阿莫西林胶囊",
-  "spec": "0.25g*24粒",
-  "traceCode": "追溯码或条码",
-  "manufacturer": "生产厂家",
-  "storageBox": "DAILY",
+  "deviceId": "zykh-qsm-001",
+  "medicineId": "slot-09-bifid-triple",
+  "name": "双歧杆菌三联活菌肠溶胶囊",
+  "storageBox": "PRESCRIPTION",
   "inventoryState": "STOCKED",
   "expireDate": "2027-12",
   "expiryPrecision": "month"
 }
 ```
 
-云端文档 ID 由 `deviceId + medicineId` 生成。`slot` / `hardware_slot` 仍可随旧记录上传，但只作为兼容字段，小程序不会显示或操作它。
+规则：
 
-## 5. 余量状态更新
+1. `medicineId` 非空且在同一快照内全局唯一。
+2. camel/snake 身份或分类同时存在时必须一致。
+3. `storageBox` 只允许 `DAILY / CARE / PRESCRIPTION`。
+4. `inventoryState` 使用 `STOCKED / DEPLETED / UNKNOWN`，不能仅凭数量猜测。
+5. `cabinet_id/cabinetId` 被云端拒绝。
+6. 未被小程序本地参考表识别但结构合法的药品仍可见。
 
-当前版本不建立取药流程，也不生成取药记录。若终端确认某种药已经用完，只更新该药品的余量事实：
+## 4. 版本化快照
 
-```json
-{
-  "inventoryState": "DEPLETED",
-  "depletionConfirmedAt": "2026-08-19 20:00:05",
-  "depletionConfirmationSource": "ON_DEVICE_CONFIRMATION"
-}
+Station 不再直接覆盖 live medicines 集合：
+
+```text
+BEGIN_SNAPSHOT
+  -> 获得 snapshotId / 单调 revision / 一次性 leaseToken
+UPSERT_SNAPSHOT_BATCH
+  -> 写入该版本不可变 staging rows
+FINALIZE_SNAPSHOT
+  -> 校验 count / ID / ordinal / JCS-SHA256 后原子切换 manifest
 ```
 
-小程序据此生成补药提醒；`UNKNOWN` 不生成补药待办。
+- 摘要版本固定为 `jcs-sha256-v1`。
+- 同键同 canonical bytes 重试幂等；同键不同内容冲突。
+- 同一会话不允许重复 ID、batch ordinal 或覆盖区间。
+- 旧实例、过期 lease 和迟到 finalize 均由 fencing 拒绝。
+- `ABORT_SNAPSHOT` 隔离失败会话，不立即删除审计数据。
+- 旧 finalized 版本至少保留 10 分钟，持有旧 version token 的在途读仍能完成。
+- ownerless 和其它 producer 行不自动删除，也永远不进入家庭端药库。
 
-## 6. 用药风险事件
+`LIST_MEDICINES` 仅作为旧客户端只读兼容接口，数据源仍是同一 finalized manifest，并一次返回完整数组，不使用默认 20 条截断。
 
-AI 给出药品建议前，Station 应结合当前人物档案和药库信息完成核验。明确风险事件示例：
+## 5. 小程序投影
 
-```json
-{
-  "type": "MEDICATION_SAFETY_EVENT",
-  "event_id": "risk-20260819-001",
-  "service_user_id": "person-zhang",
-  "persona_generation": "g1",
-  "person_display_name": "张三",
-  "medicine_id": "med-ibuprofen",
-  "medicine_name": "布洛芬缓释胶囊",
-  "check_status": "BLOCKED",
-  "dispense_status": "NOT_APPLICABLE",
-  "reason_codes": ["CONTRAINDICATION"],
-  "caregiver_summary": "与已登记的消化道溃疡病史存在禁忌冲突。",
-  "occurred_at": "2026-08-19 20:10:00",
-  "read_state": "UNREAD"
-}
+小程序调用 `GET_MEDICINE_SNAPSHOT`，只接受包含以下证明的响应：
+
+```text
+boardMedicineSnapshot=v1
+protocol=boardMedicineSnapshot:v1
+kind=medicines
+canonicalDigestVersion=jcs-sha256-v1
+snapshotComplete=true
+snapshotId/revision/digest/rowCount/deviceId 完整且一致
 ```
 
-小程序按“人物身份版本 + 药品身份”合并重复核验，集中显示谁不宜使用哪些药；原始事件仍保留在照护历史中。
+任何缺失、冲突或非法行都失败关闭。上次成功数据可单独标记为 last-known，但不能伪装成当前快照，也不能把协议不兼容误写成“等待药箱连接”。
 
-## 7. 旧功能处理
+## 6. Release A 限制
 
-- 停止板端产生 `OPEN_CABINET`、`DISPENSE` 或舵机执行请求。
-- 不再把 `dispense_status=DISPENSED` 作为新版用药完成依据。
-- `UPSERT_MEDICINE` 仅作为旧客户端兼容命令；新流程必须由 Station 扫码入库后上传快照。
-- 旧 `slot` 字段不得出现在新版用户界面、提醒文案或风险结论中。
+Release A 仅同步心跳和药库。人物、计划、问询、体征、记录、风险事件、自助配对和远程命令仍处于迁移门禁中。
 
-## 8. 部署与验收
+因此：
 
-1. 部署本仓库 `cloudfunctions/api`，调用 `PING`，确认 `schemaRevision` 为 `3.0-three-box-library`。
-2. 确认能力包含 `medicineStorageBoxes=v1` 和 `medicationRiskRegistry=v1`。
-3. 完成本地数据库迁移并上传一次完整药品快照。
-4. 备份并清理该设备旧版随机 ID 药品文档；云函数只会自动回收由 `zykh_station_app` 标记为同步所有者的旧快照。
-5. 在云数据库确认同一设备每个 `medicineId` 只有一条药品文档。
-6. 打开小程序“药库”，确认日常高频内服 9 种、外用消毒护理 8 种、慢病处方储备 5 种，总数为 22 种。
-7. 修改一条药品有效期并重新上传，确认小程序在下一次实时刷新后更新。
-8. 上传一条 `DEPLETED` 药品，确认出现补药提示；上传 `UNKNOWN`，确认只显示余量待确认。
-9. 上传一条 `BLOCKED + NOT_APPLICABLE` 风险事件，确认“用药风险”页按人物和药品展示。
-10. 确认小程序不存在取药记录、23 仓、开柜、出药或舵机操作入口。
+- `UPLOAD_MEDICINES/UPLOAD_SNAPSHOT` 返回 `SNAPSHOT_PROTOCOL_REQUIRED`。
+- `UPSERT_MEDICINE` 永久禁用。
+- `OPEN_CABINET/DISPENSE` 永久禁用。
+- 人物相关 action 返回 `PERSONA_DATA_MIGRATION_IN_PROGRESS`。
+- 命令相关 action 返回 `REMOTE_COMMANDS_DISABLED`。
 
-## 9. 回滚原则
+## 7. 验收
 
-迁移前备份 Station SQLite 和 CloudBase `medicines` 集合。若新版同步异常，只回滚程序版本和数据库备份，不要让新版 `medicineId` 与旧版随机文档 ID 同时写入同一设备作用域。
+1. 云端 PING 与 Release A 七项能力精确一致。
+2. 当前 manifest 为 23 行、9/8/6。
+3. S09 位于慢病处方，无 `COLD` 分类。
+4. S03/S13 使用正确 canonical ID 和名称。
+5. staging、ownerless 和其它 producer 行不进入小程序。
+6. finalize 前持续读取旧完整版本，finalize 后一次切换到新完整版本。
+7. 小程序所有药品维护入口只提示到 Station 现场操作。
+
+## 8. 回滚
+
+迁移前备份 Station SQLite、CloudBase manifest pointer、session、rows 和 membership。失败时先暂停 Station，再成对恢复云端版本指针和本地 SQLite；不能全表删除，也不能退回 22 种或删除 S09。

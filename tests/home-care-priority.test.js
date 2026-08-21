@@ -27,12 +27,23 @@ function deferred() {
 function loadHomePage(snapshot, vitals = [], wx = {}, medicines = [], expirySummary = null, device = { online: true }, apiOverrides = {}) {
   let definition = null;
   const source = fs.readFileSync(pagePath, "utf8");
+  const normalizedDevice = device && device.connection
+    ? device
+    : Object.assign({}, device, device && device.online === true ? {
+      heartbeatAgeMs: 0,
+      lastSeenAtEpochMs: Date.now(),
+      connection: { state: "online", online: true, heartbeatAgeMs: 0 },
+    } : {});
+  const normalizedMedicines = (medicines || []).map((medicine, index) => Object.assign({
+    medicineId: `legacy-slot-${medicine.slot || index + 1}`,
+    storageBox: "DAILY",
+  }, medicine));
   const api = {
     buildHeader: () => ({}),
-    getDevice: async () => device,
-    getDeviceStrict: apiOverrides.getDeviceStrict || (async () => device),
-    getMedicines: async () => medicines,
-    getMedicinesStrict: apiOverrides.getMedicinesStrict || (async () => medicines),
+    getDevice: async () => normalizedDevice,
+    getDeviceStrict: apiOverrides.getDeviceStrict || (async () => normalizedDevice),
+    getMedicines: async () => normalizedMedicines,
+    getMedicinesStrict: apiOverrides.getMedicinesStrict || (async () => normalizedMedicines),
     getRecentRecords: async () => [],
     getRecentRecordsStrict: apiOverrides.getRecentRecordsStrict || (async () => []),
     getRecentVitals: async () => vitals,
@@ -70,7 +81,7 @@ function loadHomePage(snapshot, vitals = [], wx = {}, medicines = [], expirySumm
         return require("../miniprogram/utils/dateTime");
       }
       if (modulePath.includes("utils/deviceSession")) {
-        return {
+        return Object.assign({}, require("../miniprogram/utils/deviceSession"), {
           runAfterDeviceSessionReady(callback) {
             if (app.globalData.deviceSessionResolved !== true
               && typeof app.waitForDeviceSession === "function") {
@@ -78,7 +89,7 @@ function loadHomePage(snapshot, vitals = [], wx = {}, medicines = [], expirySumm
             }
             return callback();
           },
-        };
+        });
       }
       if (modulePath.includes("modules/personaVisibility")) {
         return require("../miniprogram/modules/personaVisibility");
@@ -98,15 +109,23 @@ function loadHomePage(snapshot, vitals = [], wx = {}, medicines = [], expirySumm
       }
       if (modulePath.includes("utils/expiry")) {
         return {
-          summarizeExpiry: input => (typeof expirySummary === "function" ? expirySummary(input) : expirySummary) || ({
-            attention: [],
-            expiredCount: 0,
-            expiringCount: 0,
-            missingCount: 0,
-            validCount: 0,
-            medicines: [],
-            nextAttention: null,
-          }),
+          summarizeExpiry: input => {
+            const summary = (typeof expirySummary === "function" ? expirySummary(input) : expirySummary) || ({
+              attention: [],
+              expiredCount: 0,
+              expiringCount: 0,
+              missingCount: 0,
+              validCount: 0,
+              medicines: [],
+              nextAttention: null,
+            });
+            return Object.assign({}, summary, {
+              attention: (summary.attention || []).map((item, index) => Object.assign({
+                medicineId: `legacy-slot-${item.slot || index + 1}`,
+                storageBox: "DAILY",
+              }, item)),
+            });
+          },
         };
       }
       throw new Error(`unexpected module ${modulePath}`);
@@ -1151,7 +1170,7 @@ test("a failed membership session without a selected box stays on account recove
   assert.equal(scopedReads, 0);
   assert.equal(subscriptions, 0);
   assert.equal(page.data.carePage.phase.kind, "ready");
-  assert.match(page.data.carePage.focus.title, /确认药箱权限/);
+  assert.match(page.data.carePage.focus.title, /药箱状态暂不可用|重新确认/);
   assert.match(page.data.carePage.focus.supporting, /授权药箱列表读取失败/);
   assert.equal(page.data.carePage.focus.activation, "surface");
   assert.equal(page.data.carePage.focus.action.id, "home.focus.connection");

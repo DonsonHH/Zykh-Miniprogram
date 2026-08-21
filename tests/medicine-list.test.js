@@ -10,6 +10,7 @@ const root = path.join(__dirname, "..");
 function loadMedicineList(slots, apiOverrides = {}) {
   let definition = null;
   const navigations = [];
+  const toasts = [];
   const app = apiOverrides.app || { globalData: { deviceId: apiOverrides.deviceId || "" } };
   const source = fs.readFileSync(pagePath, "utf8");
   vm.runInNewContext(source, {
@@ -53,6 +54,9 @@ function loadMedicineList(slots, apiOverrides = {}) {
       navigateTo(options) {
         navigations.push(options);
       },
+      showToast(options) {
+        toasts.push(options);
+      },
     },
     getApp() {
       return app;
@@ -62,6 +66,7 @@ function loadMedicineList(slots, apiOverrides = {}) {
   definition.data = Object.assign({}, definition.data);
   definition.setData = next => Object.assign(definition.data, next);
   definition.navigations = navigations;
+  definition.toasts = toasts;
   definition.app = app;
   return definition;
 }
@@ -213,7 +218,7 @@ test("medicine list keeps the last same-device rows visible and marks them stale
   assert.match(layout, /bindtap="retryLoad"/);
 });
 
-test("full medicine list keeps filtering and opens the selected slot for maintenance", async () => {
+test("full medicine list keeps filtering and directs maintenance to the medicine station", async () => {
   const page = loadMedicineList([
     { slot: 1, name: "常规药品", quantity: 1, expireDate: "2099-01" },
     { slot: 2, name: "已经过期", quantity: 1, expireDate: "2000-01" },
@@ -227,7 +232,8 @@ test("full medicine list keeps filtering and opens the selected slot for mainten
   assert.deepEqual(Array.from(page.data.viewSlots, item => item.slot), [3]);
 
   page.selectSlot({ currentTarget: { dataset: { slot: 3 } } });
-  assert.deepEqual(Array.from(page.navigations, item => item.url), ["/pages/addMedicine/index?slot=3"]);
+  assert.deepEqual(Array.from(page.navigations), []);
+  assert.equal(page.toasts.at(-1).title, "药品请在药箱端维护");
 });
 
 test("medicine list filters explicit depletion and keeps missing supported state UNKNOWN", async () => {
@@ -284,7 +290,7 @@ test("a risk number on the cabinet overview opens the corresponding filtered med
   assert.deepEqual(Array.from(page.data.viewSlots, item => item.slot), [2]);
 });
 
-test("the full list registers into the first empty slot and hides registration when all slots are occupied", async () => {
+test("the retired registration actions never create a mini-program medicine producer", async () => {
   const partial = loadMedicineList([
     { slot: 1, name: "常规药品", quantity: 1, expireDate: "2099-01" },
     { slot: 2, name: "", quantity: 0, expireDate: "" },
@@ -293,7 +299,8 @@ test("the full list registers into the first empty slot and hides registration w
 
   assert.equal(partial.data.primarySlot, 2);
   partial.goAddMedicine();
-  assert.deepEqual(Array.from(partial.navigations, item => item.url), ["/pages/addMedicine/index?slot=2"]);
+  assert.deepEqual(Array.from(partial.navigations), []);
+  assert.equal(partial.toasts.at(-1).title, "药品请在药箱端维护");
 
   const full = loadMedicineList(Array.from({ length: 23 }, (_, index) => ({
     slot: index + 1,
@@ -306,6 +313,7 @@ test("the full list registers into the first empty slot and hides registration w
   assert.equal(full.data.primarySlot, 0);
   full.goAddMedicine();
   assert.deepEqual(Array.from(full.navigations), []);
+  assert.equal(full.toasts.at(-1).title, "药品请在药箱端维护");
   const layout = fs.readFileSync(path.join(root, "miniprogram/pages/medicineList/index.wxml"), "utf8");
   assert.match(layout, /wx:if="\{\{primarySlot\}\}"[^>]*class="cabinet-primary"/);
 });
@@ -330,8 +338,9 @@ test("three-box library ships a compact overview and a dedicated full list", () 
   assert.match(overviewLogic, /id:\s*"library\.attention"/);
   assert.match(overviewLogic, /key:\s*"library-cabinet-total",\s*label:\s*"药柜数量",\s*value:\s*summary\.cabinetCount/);
   assert.match(overviewLogic, /key:\s*"library-attention-total",\s*label:\s*"待处理"/);
-  assert.match(overviewLogic, /includeFixedBaseline:\s*hasLiveMedicines/);
-  assert.match(listLogic, /includeFixedBaseline:\s*hasLiveMedicines/);
+  assert.match(overviewLogic, /getMedicinesStrict/);
+  assert.match(listLogic, /getMedicinesStrict/);
+  assert.doesNotMatch(`${overviewLogic}\n${listLogic}`, /includeFixedBaseline|mergeFixedMedicineBaseline/);
   assert.doesNotMatch(`${overview}\n${overviewLogic}`, /OPEN_CABINET|DISPENSE|23\s*仓/);
   const retiredStoragePattern = new RegExp(`\\u51b7\\u85cf|\\b${"CO" + "LD"}\\b`);
   assert.doesNotMatch(`${overview}\n${overviewLogic}\n${list}\n${listLogic}`, retiredStoragePattern);

@@ -4,26 +4,20 @@ const {
   createMedicationSafetyEventModule,
 } = require("./medicationSafetyEvents");
 const { createMembershipModule } = require("./memberships");
+const { createSnapshotStore } = require("./snapshotStore");
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 const db = cloud.database();
 const schemaRevision = "3.0-three-box-library";
 const capabilities = Object.freeze({
-  medicationSafetyEvents: "v1",
-  caregiverMembership: "v1",
-  inquiryDetail: "v1",
   snapshotBatch: "v2",
-  devicePairing: "v1",
-  devicePairingIssue: "v1",
-  caregiverNotificationOutbox: "v1",
-  caregiverNotificationWorker: "v1",
+  snapshotFencing: "v1",
+  snapshotCanonicalDigest: "jcs-sha256-v1",
+  boardMedicineSnapshot: "v1",
   explicitInventoryState: "v1",
   medicineStorageBoxes: "v1",
-  manualMedicationUse: "v1",
-  medicationRiskRegistry: "v1",
-  personaLifecycle: "v1",
-  vitalsAttribution: "v1",
+  caregiverMembership: "v1",
 });
 
 const collections = {
@@ -41,6 +35,10 @@ const collections = {
   caregiverNotificationSubscriptions: "caregiver_notification_subscriptions",
   deviceMemberships: "device_memberships",
   devicePairingCodes: "device_pairing_codes",
+  snapshotHeads: "snapshot_heads",
+  snapshotSessions: "snapshot_sessions",
+  snapshotRows: "snapshot_rows",
+  snapshotManifests: "snapshot_manifests",
 };
 
 const memberships = createMembershipModule({
@@ -56,6 +54,12 @@ const medicationSafetyEvents = createMedicationSafetyEventModule({
   nowText,
   safeId,
 });
+const snapshots = createSnapshotStore({
+  db,
+  collections,
+  nowText,
+  nowEpochMs: () => Date.now(),
+});
 
 const boardActions = new Set([
   "REPORT_DEVICE",
@@ -63,15 +67,18 @@ const boardActions = new Set([
   "UPLOAD_VITALS",
   "UPLOAD_RECORD",
   "UPLOAD_SNAPSHOT",
+  "BEGIN_SNAPSHOT",
   "UPSERT_SNAPSHOT_BATCH",
   "FINALIZE_SNAPSHOT",
+  "ABORT_SNAPSHOT",
+  "GET_BOARD_MEDICINE_MANIFEST",
   "PULL_COMMANDS",
   "ACK_COMMAND",
-  "ISSUE_DEVICE_PAIRING_CODE",
 ]);
 
 const readActions = new Set([
   "GET_DEVICE",
+  "GET_MEDICINE_SNAPSHOT",
   "LIST_MEDICINES",
   "GET_LATEST_VITALS",
   "LIST_VITALS",
@@ -88,6 +95,7 @@ const readActions = new Set([
 const readActionPermissions = Object.freeze({
   GET_LATEST_VITALS: "READ_VITALS",
   GET_INQUIRY_DETAIL: "READ_INQUIRY",
+  GET_MEDICINE_SNAPSHOT: "READ_MEDICINE",
   LIST_MEDICINES: "READ_MEDICINE",
   LIST_COMMANDS: "CREATE_COMMAND",
   LIST_INQUIRIES: "READ_INQUIRY",
@@ -95,14 +103,59 @@ const readActionPermissions = Object.freeze({
   LIST_VITALS: "READ_VITALS",
 });
 
+const releaseAPersonaReadActions = new Set([
+  "GET_LATEST_VITALS",
+  "LIST_VITALS",
+  "LIST_RECORDS",
+  "LIST_COMMANDS",
+  "LIST_INQUIRIES",
+  "GET_INQUIRY_DETAIL",
+  "GET_SNAPSHOT",
+  "LIST_MEDICATION_SAFETY_EVENTS",
+  "GET_MEDICATION_SAFETY_EVENT",
+  "MARK_MEDICATION_SAFETY_EVENT_READ",
+]);
+
 const allowedCommandTypes = new Set([
   "AUDIO_BEEP",
   "AUDIO_SPEAK",
   "READ_VITALS_ALL",
   "AI_CHAT",
-  "UPSERT_MEDICINE",
   "UPSERT_SERVICE_USER",
   "UPSERT_TODAY_PLAN",
+]);
+
+const releaseADeviceReportFields = Object.freeze([
+  "name",
+  "displayName",
+  "display_name",
+  "network",
+  "networkType",
+  "network_type",
+  "signal",
+  "signalStrength",
+  "signal_strength",
+  "ip",
+  "ipAddress",
+  "ip_address",
+  "localApi",
+  "local_api",
+  "cloudAgent",
+  "cloud_agent",
+  "board",
+  "stm32",
+  "schemaVersion",
+  "schema_version",
+  "schemaRevision",
+  "schema_revision",
+  "agentVersion",
+  "agent_version",
+  "appVersion",
+  "app_version",
+  "firmwareVersion",
+  "firmware_version",
+  "uptimeSeconds",
+  "uptime_seconds",
 ]);
 
 function nowText() {
@@ -124,6 +177,13 @@ function cleanData(value) {
   delete result._openid;
   delete result.deviceSecret;
   return result;
+}
+
+function releaseADeviceReport(data = {}) {
+  return releaseADeviceReportFields.reduce((result, field) => {
+    if (Object.prototype.hasOwnProperty.call(data, field)) result[field] = data[field];
+    return result;
+  }, {});
 }
 
 function compactTextList(...values) {
@@ -399,153 +459,6 @@ function normalizeVitals(vitals = {}, fallbackTime = "") {
   });
 }
 
-function presentValue(source, ...names) {
-  for (const name of names) {
-    if (Object.prototype.hasOwnProperty.call(source || {}, name)) {
-      return { present: true, value: source[name] };
-    }
-  }
-  return { present: false, value: undefined };
-}
-
-function validateNonNegativeInteger(source, ...names) {
-  const field = presentValue(source, ...names);
-  if (!field.present) return;
-  const value = Number(field.value);
-  if (!Number.isInteger(value) || value < 0) throw new Error(`${names[0]} must be a non-negative integer`);
-}
-
-function validMedicineExpiry(value) {
-  const text = String(value || "").trim();
-  const monthMatch = /^(\d{4})-(\d{2})$/.exec(text);
-  if (monthMatch) {
-    const month = Number(monthMatch[2]);
-    return month >= 1 && month <= 12;
-  }
-  const dayMatch = /^(\d{4})-(\d{2})-(\d{2})$/.exec(text);
-  if (!dayMatch) return false;
-  const year = Number(dayMatch[1]);
-  const month = Number(dayMatch[2]);
-  const day = Number(dayMatch[3]);
-  if (month < 1 || month > 12 || day < 1) return false;
-  const date = new Date(Date.UTC(year, month - 1, day));
-  return (
-    date.getUTCFullYear() === year
-    && date.getUTCMonth() === month - 1
-    && date.getUTCDate() === day
-  );
-}
-
-function distinctMedicineValues(sources, names) {
-  const values = [];
-  for (const source of sources) {
-    for (const name of names) {
-      if (!Object.prototype.hasOwnProperty.call(source || {}, name)) continue;
-      const value = String(source[name] ?? "").trim();
-      if (value) values.push(value);
-    }
-  }
-  return Array.from(new Set(values));
-}
-
-function validateMedicineCommand(payload = {}) {
-  const operation = String(payload.operation || "upsert").toLowerCase();
-  if (!["upsert", "patch"].includes(operation)) throw new Error("unsupported medicine operation");
-  if (operation === "patch" && (!payload.patch || typeof payload.patch !== "object" || Array.isArray(payload.patch))) {
-    throw new Error("medicine patch required");
-  }
-  const source = operation === "patch" ? payload.patch : payload;
-  const slotValues = [
-    payload.hardware_slot,
-    payload.hardwareSlot,
-    payload.slot,
-    source.hardware_slot,
-    source.hardwareSlot,
-    source.slot,
-  ].filter(value => value !== undefined && value !== null && value !== "");
-  if (new Set(slotValues.map(value => String(value).trim())).size > 1) {
-    throw new Error("conflicting medicine slot fields");
-  }
-  const slotField = firstPresent(
-    ...slotValues,
-  );
-  const slot = Number(slotField);
-  if (slotField !== null && slotField !== "" && (!Number.isInteger(slot) || slot < 1)) {
-    throw new Error("legacy medicine slot must be a positive integer");
-  }
-  const medicineIdentity = firstPresent(
-    payload.medicineId,
-    payload.medicine_id,
-    source.medicineId,
-    source.medicine_id,
-    payload.traceCode,
-    payload.trace_code,
-    source.traceCode,
-    source.trace_code,
-    slotField,
-  );
-  if (!medicineIdentity) throw new Error("medicine identity required");
-
-  const allowedPatchFields = new Set([
-    "name", "manufacturer", "barcode", "code", "category", "spec", "trace_code", "traceCode",
-    "stock", "quantity", "low_stock_line", "lowStockLine", "unit", "expire_date", "expireDate",
-    "expiryPrecision", "hardware_slot", "hardwareSlot", "slot",
-    "medicineId", "medicine_id", "storageBox", "storage_box", "boxType", "box_type",
-    "aliases", "active_ingredients", "structured_contraindications", "safety_review_status",
-  ]);
-  if (operation === "patch") {
-    const unknown = Object.keys(source).filter(key => !allowedPatchFields.has(key));
-    if (unknown.length) throw new Error(`unsupported medicine patch field: ${unknown[0]}`);
-    if (Object.keys(source).length === 0) throw new Error("medicine patch must include at least one field");
-  }
-
-  validateNonNegativeInteger(source, "quantity", "stock");
-  validateNonNegativeInteger(source, "lowStockLine", "low_stock_line");
-  if (source !== payload) {
-    validateNonNegativeInteger(payload, "quantity", "stock");
-    validateNonNegativeInteger(payload, "lowStockLine", "low_stock_line");
-  }
-  for (const fieldName of ["aliases", "active_ingredients"]) {
-    const field = presentValue(source, fieldName);
-    if (!field.present) continue;
-    if (!Array.isArray(field.value) || field.value.length > 12
-        || field.value.some(value => !String(value || "").trim())) {
-      throw new Error(`${fieldName} must be a non-empty text array with at most 12 items`);
-    }
-  }
-  const structured = presentValue(source, "structured_contraindications");
-  if (structured.present && (
-    !Array.isArray(structured.value)
-    || structured.value.length > 12
-    || structured.value.some(item => !item || typeof item !== "object" || Array.isArray(item)
-      || !String(item.concept_code || "").trim()
-      || !String(item.display_text || "").trim())
-  )) {
-    throw new Error("structured_contraindications must contain concept_code and display_text");
-  }
-  const safetyReviewStatus = presentValue(source, "safety_review_status");
-  if (safetyReviewStatus.present && String(safetyReviewStatus.value || "").trim().toLowerCase() !== "draft") {
-    throw new Error("remote safety_review_status must remain draft");
-  }
-  const name = presentValue(source, "name");
-  if (name.present && !String(name.value || "").trim()) throw new Error("medicine name must not be empty");
-  if (operation === "upsert" && !String(name.value || "").trim()) throw new Error("medicine name required");
-
-  const expiryValues = distinctMedicineValues([payload, source], ["expireDate", "expire_date"]);
-  if (expiryValues.length > 1) throw new Error("medicine expiry aliases conflict");
-  const expiry = expiryValues[0] || "";
-  if (expiry && !validMedicineExpiry(expiry)) throw new Error("valid medicine expiry required");
-  const precisionValues = distinctMedicineValues(
-    [payload, source],
-    ["expiryPrecision", "expiry_precision"],
-  );
-  if (precisionValues.length > 1) throw new Error("medicine expiry precision aliases conflict");
-  if (precisionValues.length) {
-    const expected = /^\d{4}-\d{2}-\d{2}$/.test(expiry) ? "day" : /^\d{4}-\d{2}$/.test(expiry) ? "month" : "unknown";
-    if (!expiry || precisionValues[0] !== expected) throw new Error("medicine expiry precision does not match expiry date");
-  }
-}
-
 function configuredDeviceSecrets() {
   try {
     const map = JSON.parse((process.env.DEVICE_SECRETS || "{}").trim() || "{}");
@@ -562,15 +475,9 @@ function expectedPerDeviceSecret(deviceId) {
     : "";
 }
 
-function expectedDeviceSecret(deviceId) {
-  const perDevice = expectedPerDeviceSecret(deviceId);
-  if (perDevice) return perDevice;
-  return (process.env.DEVICE_SECRET || "").trim();
-}
-
 function validateDevice(data) {
   if (!data || !data.deviceId) return { ok: false, error: "deviceId required" };
-  const expected = expectedDeviceSecret(data.deviceId);
+  const expected = expectedPerDeviceSecret(data.deviceId);
   if (!expected) return { ok: false, error: "device secret is not configured" };
   if (data.deviceSecret !== expected) return { ok: false, error: "unauthorized" };
   return null;
@@ -586,7 +493,7 @@ function validatePairingIssuer(data) {
 
 function validateSafetyEventReporter(data) {
   if (!data || !data.deviceId) return { ok: false, error: "deviceId required" };
-  const expected = expectedDeviceSecret(data.deviceId);
+  const expected = expectedPerDeviceSecret(data.deviceId);
   if (!expected) return { ok: false, error: "device secret is not configured" };
   if (data.deviceSecret !== expected) return { ok: false, error: "unauthorized" };
   return null;
@@ -594,6 +501,20 @@ function validateSafetyEventReporter(data) {
 
 function validateDeviceId(data) {
   return data && data.deviceId ? null : { ok: false, error: "deviceId required" };
+}
+
+function isDocumentNotFoundError(value) {
+  const code = String((value && (value.errCode ?? value.code)) || "").toUpperCase();
+  const message = String((value && (value.errMsg || value.message)) || value || "");
+  return code === "DATABASE_DOCUMENT_NOT_EXIST"
+    || code === "DOCUMENT_NOT_EXIST"
+    || /document(?:\s+with\s+_id\s+\S+)?\s+(?:does\s+)?not\s+exist|document\s+not\s+found|missing\s+document|文档不存在/i.test(message);
+}
+
+function actionError(code) {
+  const error = new Error(code);
+  error.code = code;
+  return error;
 }
 
 function parseEvent(event = {}) {
@@ -926,40 +847,32 @@ function rowsVisibleToMembership(rows, membership, kind = "") {
   return (rows || []).filter(row => allowed.has(rowPersonId(row, kind)));
 }
 
-function deviceVisibleToMembership(device, membership) {
+function deviceVisibleToMembership(device) {
   if (!device) return device;
-  const source = device.syncSummary && typeof device.syncSummary === "object"
-    ? device.syncSummary
-    : {};
-  const syncSummary = { counts: {} };
-  if (membershipHasPermission(membership, "READ_PROFILE")) {
-    syncSummary.serviceUsers = rowsVisibleToMembership(
-      Array.isArray(source.serviceUsers) ? source.serviceUsers : [],
-      membership,
-      "serviceUsers",
-    );
-    syncSummary.counts.serviceUsers = syncSummary.serviceUsers.length;
-    if (Object.prototype.hasOwnProperty.call(source, "serviceUsersSnapshotComplete")) {
-      syncSummary.serviceUsersSnapshotComplete = source.serviceUsersSnapshotComplete === true;
-    }
-  }
-  if (membershipHasPermission(membership, "READ_PLAN")) {
-    syncSummary.plans = rowsVisibleToMembership(
-      Array.isArray(source.plans) ? source.plans : [],
-      membership,
-      "plans",
-    );
-    syncSummary.counts.plans = syncSummary.plans.length;
-  }
-  if (membershipHasPermission(membership, "READ_INQUIRY")) {
-    syncSummary.recentInquiries = rowsVisibleToMembership(
-      Array.isArray(source.recentInquiries) ? source.recentInquiries : [],
-      membership,
-      "inquiries",
-    );
-    syncSummary.counts.inquiries = syncSummary.recentInquiries.length;
-  }
-  return Object.assign(cleanData(device), { syncSummary: compactSyncSummary(syncSummary) });
+  const visible = cleanData(device);
+  [
+    "syncSummary",
+    "serviceUsers",
+    "service_users",
+    "plans",
+    "todayPlans",
+    "today_plans",
+    "recentInquiries",
+    "recent_inquiries",
+    "inquiries",
+    "vitals",
+    "lastVitals",
+    "last_vitals",
+    "records",
+    "commands",
+    "medicationSafetyEvents",
+    "medication_safety_events",
+    "patientProfile",
+    "patient_profile",
+    "healthMemories",
+    "health_memories",
+  ].forEach(field => delete visible[field]);
+  return visible;
 }
 
 function commandPersonId(type, payload = {}) {
@@ -1061,142 +974,42 @@ async function getInquiryDetail(data, membership) {
 }
 
 async function reportDevice(data) {
+  let current = {};
   try {
-    const current = (await db.collection(collections.devices).doc(data.deviceId).get()).data || {};
-    if (Number(current.schemaVersion || 0) >= 2 && Number(data.schemaVersion || 0) < 2) {
-      return current;
+    current = (await db.collection(collections.devices).doc(data.deviceId).get()).data || {};
+    if (Number(firstPresent(current.schemaVersion, current.schema_version, 0)) >= 2
+        && Number(firstPresent(data.schemaVersion, data.schema_version, 0)) < 2) {
+      throw new Error("DEVICE_SCHEMA_DOWNGRADE_REJECTED");
     }
   } catch (error) {
-    // The first heartbeat creates the document below.
+    if (error && error.message === "DEVICE_SCHEMA_DOWNGRADE_REJECTED") throw error;
+    if (isDocumentNotFoundError(error)) current = {};
+    else throw actionError("DATABASE_REQUEST_FAILED");
   }
-  const patch = Object.assign(cleanData(data), {
+  const timestamp = nowText();
+  const lastSeenAtEpochMs = Date.now();
+  const patch = Object.assign({}, cleanData(current), releaseADeviceReport(data), {
+    deviceId: data.deviceId,
     online: true,
-    lastSeenAt: nowText(),
-    updatedAt: nowText(),
+    lastSeenAt: timestamp,
+    lastSeenAtEpochMs,
+    updatedAt: timestamp,
   });
-  if (patch.syncSummary) patch.syncSummary = compactSyncSummary(patch.syncSummary);
   await setDocument(collections.devices, data.deviceId, patch);
-  return patch;
+  return Object.assign(deviceVisibleToMembership(patch), { heartbeatAgeMs: 0 });
 }
 
-async function uploadMedicines(data) {
-  const count = await replaceDeviceRows(
-    collections.medicines,
-    data.deviceId,
-    data.medicines || [],
-    row => medicineSnapshotId(data.deviceId, row),
-  );
-  return { count };
-}
-
-async function uploadVitals(data) {
-  if (!data.vitals) throw new Error("vitals required");
-  const row = Object.assign(normalizeVitals(data.vitals), {
-    deviceId: data.deviceId,
-    createdAt: firstPresent(data.vitals.createdAt, data.vitals.created_at, data.vitals.measured_at, nowText()),
+function projectDeviceHeartbeat(device = {}) {
+  const lastSeenAtEpochMs = Number(device.lastSeenAtEpochMs || 0);
+  const heartbeatAgeMs = lastSeenAtEpochMs > 0
+    ? Math.max(0, Date.now() - lastSeenAtEpochMs)
+    : null;
+  return Object.assign(cleanData(device), {
+    lastSeenAt: String(device.lastSeenAt || ""),
+    lastSeenAtEpochMs,
+    heartbeatAgeMs,
+    online: heartbeatAgeMs !== null && heartbeatAgeMs < 60 * 1000,
   });
-  const id = `${data.deviceId}-vitals-${safeId(data.vitals.id || data.vitals.recordId || row.createdAt)}`;
-  await setDocument(collections.vitals, id, row);
-  return Object.assign({ _id: id }, row);
-}
-
-async function uploadRecord(data) {
-  if (!data.record) throw new Error("record required");
-  const row = Object.assign(cleanData(data.record), {
-    deviceId: data.deviceId,
-    createdAt: data.record.createdAt || data.record.created_at || nowText(),
-  });
-  const id = `${data.deviceId}-record-${safeId(data.record.id || data.record.recordId || row.createdAt)}`;
-  await setDocument(collections.records, id, row);
-  return Object.assign({ _id: id }, row);
-}
-
-async function uploadSnapshot(data) {
-  const deviceId = data.deviceId;
-  const snapshot = data.snapshot || {};
-  const counts = {};
-  if (Object.prototype.hasOwnProperty.call(snapshot, "medicines")) {
-    counts.medicines = await replaceDeviceRows(collections.medicines, deviceId, snapshot.medicines || [], row => medicineSnapshotId(deviceId, row));
-  }
-  if (Object.prototype.hasOwnProperty.call(snapshot, "serviceUsers")) {
-    counts.serviceUsers = await replaceDeviceRows(
-      collections.serviceUsers,
-      deviceId,
-      snapshot.serviceUsers || [],
-      row => serviceUserSnapshotId(deviceId, row),
-      "serviceUsers",
-    );
-  }
-  if (Object.prototype.hasOwnProperty.call(snapshot, "plans")) {
-    counts.plans = await replaceDeviceRows(collections.plans, deviceId, snapshot.plans || [], row => `${deviceId}-plan-${safeId(row.id)}`);
-  }
-  if (Object.prototype.hasOwnProperty.call(snapshot, "inquiries")) {
-    counts.inquiries = await replaceDeviceRows(collections.inquiries, deviceId, snapshot.inquiries || [], row => `${deviceId}-inquiry-${safeId(row.inquiry_id || row.session_id || row.id)}`);
-  }
-  if (Object.prototype.hasOwnProperty.call(snapshot, "vitals")) {
-    counts.vitals = await replaceDeviceRows(collections.vitals, deviceId, snapshot.vitals || [], row => `${deviceId}-vitals-${safeId(row.id || row.measured_at || row.createdAt)}`);
-  }
-  if (Object.prototype.hasOwnProperty.call(snapshot, "records")) {
-    counts.records = await replaceDeviceRows(collections.records, deviceId, snapshot.records || [], row => `${deviceId}-record-${safeId(row.id || row.created_at || row.createdAt)}`);
-  }
-  return { counts, syncedAt: nowText(), schemaVersion: 2 };
-}
-
-function snapshotKind(kind, deviceId) {
-  const map = {
-    medicines: [collections.medicines, row => medicineSnapshotId(deviceId, row)],
-    serviceUsers: [collections.serviceUsers, row => serviceUserSnapshotId(deviceId, row)],
-    plans: [collections.plans, row => `${deviceId}-plan-${safeId(row.id)}`],
-    inquiries: [collections.inquiries, row => `${deviceId}-inquiry-${safeId(row.inquiry_id || row.session_id || row.id)}`],
-    vitals: [collections.vitals, row => `${deviceId}-vitals-${safeId(row.id || row.measured_at || row.createdAt)}`],
-    records: [collections.records, row => `${deviceId}-record-${safeId(row.id || row.created_at || row.createdAt)}`],
-  };
-  if (!map[kind]) throw new Error("unsupported snapshot kind");
-  return map[kind];
-}
-
-async function upsertSnapshotBatch(data) {
-  const [collection, idForRow] = snapshotKind(data.kind, data.deviceId);
-  const ids = [];
-  for (const row of data.rows || []) {
-    const id = idForRow(row);
-    ids.push(id);
-    const normalized = data.kind === "vitals" ? normalizeVitals(cleanData(row)) : cleanData(row);
-    if (data.kind === "vitals") {
-      normalized.createdAt = firstPresent(
-        row.measured_at,
-        row.measuredAt,
-        row.createdAt,
-        row.created_at,
-        normalized.createdAt,
-        nowText(),
-      );
-    }
-    await setSnapshotDocument(collection, id, Object.assign(normalized, {
-      deviceId: data.deviceId,
-      syncOwner: "zykh_station_app",
-      updatedAt: nowText(),
-    }), data.kind);
-  }
-  return { kind: data.kind, ids, count: ids.length };
-}
-
-async function finalizeSnapshot(data) {
-  const [collection] = snapshotKind(data.kind, data.deviceId);
-  const keep = new Set(data.ids || []);
-  const existing = await listAllDeviceRows(collection, data.deviceId);
-  const stale = existing.filter(item => item.syncOwner === "zykh_station_app" && !keep.has(item._id));
-  await Promise.all(stale.map(item => db.collection(collection).doc(item._id).remove()));
-  if (data.kind === "records") await cleanupLegacyRecords(data.deviceId);
-  return { kind: data.kind, removed: stale.length };
-}
-
-async function cleanupLegacyRecords(deviceId) {
-  const legacyTypes = new Set(["SERVICE_USER", "TODAY_PLAN", "INQUIRY"]);
-  const records = await listAllDeviceRows(collections.records, deviceId);
-  const legacy = records.filter(item => legacyTypes.has(item.type) && !item.syncOwner);
-  await Promise.all(legacy.map(item => db.collection(collections.records).doc(item._id).remove()));
-  return legacy.length;
 }
 
 async function pullCommands(data) {
@@ -1500,7 +1313,6 @@ async function createCommand(data, wxContext, isHttp) {
     && !commandPersonaGeneration(data.payload || {})
   ) throw new Error("INVALID_ARGUMENT");
   if (!allowedCommandTypes.has(data.type)) throw new Error("unsupported command type");
-  if (data.type === "UPSERT_MEDICINE") validateMedicineCommand(data.payload || {});
   const row = {
     deviceId: data.deviceId,
     type: data.type,
@@ -1562,14 +1374,15 @@ async function handleAction(payload, wxContext, isHttp = false) {
   ]);
   let readMembership = null;
   if (action === "PING") {
-    return { ok: true, time: nowText(), schemaVersion: 2, schemaRevision, capabilities, collections };
+    return { ok: true, time: nowText(), schemaVersion: 2, schemaRevision, capabilities };
+  }
+  if (action === "ISSUE_DEVICE_PAIRING_CODE" || action === "REDEEM_DEVICE_PAIRING_CODE") {
+    throw actionError("DEVICE_PAIRING_NOT_AVAILABLE");
   }
   if (action === "REPORT_MEDICATION_SAFETY_EVENT") {
     const error = validateSafetyEventReporter(data);
     if (error) return error;
-  } else if (action === "ISSUE_DEVICE_PAIRING_CODE") {
-    const error = validatePairingIssuer(data);
-    if (error) return error;
+    throw actionError("PERSONA_DATA_MIGRATION_IN_PROGRESS");
   } else if (boardActions.has(action)) {
     const error = validateDevice(data);
     if (error) return error;
@@ -1581,62 +1394,56 @@ async function handleAction(payload, wxContext, isHttp = false) {
       if (safetyReadActions.has(action)) {
         // The safety-event module performs its own permission and person-scope check.
       } else {
-      const membershipInput = {
-        openId,
-        deviceId: data.deviceId,
-      };
-      readMembership = readActionPermissions[action]
-        ? await memberships.requirePermission(membershipInput, readActionPermissions[action])
-        : await memberships.requireMembership(membershipInput);
+        const membershipInput = {
+          openId,
+          deviceId: data.deviceId,
+        };
+        readMembership = readActionPermissions[action]
+          ? await memberships.requirePermission(membershipInput, readActionPermissions[action])
+          : await memberships.requireMembership(membershipInput);
       }
     }
+  }
+  if (releaseAPersonaReadActions.has(action)) {
+    throw actionError("PERSONA_DATA_MIGRATION_IN_PROGRESS");
+  }
+  if (action === "CREATE_COMMAND") {
+    requireMiniprogramIdentity(wxContext, isHttp);
+    throw actionError("REMOTE_COMMANDS_DISABLED");
   }
 
   switch (action) {
     case "REPORT_DEVICE": return reportDevice(data);
-    case "UPLOAD_MEDICINES": return uploadMedicines(data);
-    case "UPLOAD_VITALS": return uploadVitals(data);
-    case "UPLOAD_RECORD": return uploadRecord(data);
-    case "UPLOAD_SNAPSHOT": return uploadSnapshot(data);
-    case "UPSERT_SNAPSHOT_BATCH": return upsertSnapshotBatch(data);
-    case "FINALIZE_SNAPSHOT": return finalizeSnapshot(data);
-    case "PULL_COMMANDS": return pullCommands(data);
-    case "ACK_COMMAND": return ackCommand(data);
-    case "ISSUE_DEVICE_PAIRING_CODE": return memberships.issuePairingCode(data);
-    case "REPORT_MEDICATION_SAFETY_EVENT": return medicationSafetyEvents.report(data);
-    case "LIST_MEDICATION_SAFETY_EVENTS": return medicationSafetyEvents.list(data, wxContext);
-    case "GET_MEDICATION_SAFETY_EVENT": return medicationSafetyEvents.get(data, wxContext);
-    case "MARK_MEDICATION_SAFETY_EVENT_READ": return medicationSafetyEvents.markRead(data, wxContext);
+    case "BEGIN_SNAPSHOT": return snapshots.begin(data);
+    case "UPSERT_SNAPSHOT_BATCH": return snapshots.upsertBatch(data);
+    case "FINALIZE_SNAPSHOT": return snapshots.finalize(data);
+    case "ABORT_SNAPSHOT": return snapshots.abort(data);
+    case "GET_BOARD_MEDICINE_MANIFEST": return snapshots.readCurrentManifest(data.deviceId);
+    case "UPLOAD_MEDICINES":
+    case "UPLOAD_SNAPSHOT": throw actionError("SNAPSHOT_PROTOCOL_REQUIRED");
+    case "UPLOAD_VITALS":
+    case "UPLOAD_RECORD": throw actionError("PERSONA_DATA_MIGRATION_IN_PROGRESS");
+    case "PULL_COMMANDS":
+    case "ACK_COMMAND": throw actionError("REMOTE_COMMANDS_DISABLED");
     case "GET_MY_DEVICES": return memberships.listMyDevices({
       openId: requireMiniprogramIdentity(wxContext, isHttp),
     });
-    case "REDEEM_DEVICE_PAIRING_CODE": return memberships.redeemPairingCode({
-      openId: requireMiniprogramIdentity(wxContext, isHttp),
-      pairingCode: data.pairingCode,
-    });
-    case "CREATE_COMMAND": return createCommand(data, wxContext, isHttp);
     case "GET_DEVICE": {
       try {
-        const device = (await db.collection(collections.devices).doc(data.deviceId).get()).data || null;
-        return deviceVisibleToMembership(device, readMembership);
+        const result = await db.collection(collections.devices).doc(data.deviceId).get();
+        const device = result && result.data ? result.data : null;
+        if (!device || String(device.deviceId || device._id || "") !== String(data.deviceId)) {
+          throw actionError("NOT_FOUND");
+        }
+        return deviceVisibleToMembership(projectDeviceHeartbeat(device), readMembership);
       } catch (error) {
-        return null;
+        if (error && error.code === "NOT_FOUND") throw error;
+        if (isDocumentNotFoundError(error)) throw actionError("NOT_FOUND");
+        throw actionError("DATABASE_REQUEST_FAILED");
       }
     }
-    case "LIST_MEDICINES": return listRows(collections.medicines, data.deviceId, data.limit, "updatedAt", "desc");
-    case "GET_LATEST_VITALS": return (
-      await listVitals(Object.assign({}, data, { limit: 1 }), readMembership)
-    )[0] || null;
-    case "LIST_VITALS": return listVitals(data, readMembership);
-    case "LIST_RECORDS": return scopedRows(collections.records, data, readMembership, "createdAt", "desc", "records");
-    case "LIST_COMMANDS": return scopedRows(collections.commands, data, readMembership, "updatedAt", "desc", "commands");
-    case "LIST_INQUIRIES": return rowsVisibleToMembership(
-      await listInquiries(Object.assign({}, data, { limit: 2000 })),
-      readMembership,
-      "inquiries",
-    ).slice(0, requestedLimit(data, 100));
-    case "GET_INQUIRY_DETAIL": return getInquiryDetail(data, readMembership);
-    case "GET_SNAPSHOT": return snapshotVisibleToMembership(data, readMembership);
+    case "GET_MEDICINE_SNAPSHOT": return snapshots.readMedicineSnapshot(data.deviceId, data);
+    case "LIST_MEDICINES": return snapshots.listMedicines(data.deviceId);
     default: throw new Error(`unknown action: ${action}`);
   }
 }
@@ -1648,7 +1455,11 @@ exports.main = async event => {
     const result = await handleAction(parsed.payload, cloud.getWXContext(), parsed.isHttp);
     return parsed.isHttp ? httpResult(result) : result;
   } catch (error) {
-    const result = { ok: false, error: error && error.message ? error.message : String(error) };
+    const result = {
+      ok: false,
+      error: error && error.message ? error.message : String(error),
+      code: error && error.code ? error.code : undefined,
+    };
     return parsed.isHttp ? httpResult(result) : result;
   }
 };
