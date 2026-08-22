@@ -39,6 +39,7 @@ function loadSettingsPage(api, context = {}) {
       if (modulePath.includes("dateTime")) return require("../miniprogram/utils/dateTime");
       if (modulePath.includes("carePlan")) return require("../miniprogram/utils/carePlan");
       if (modulePath.includes("carePage")) return require("../miniprogram/utils/carePage");
+      if (modulePath.includes("offlinePageCache")) return require("../miniprogram/utils/offlinePageCache");
       if (modulePath.includes("connectionState")) return require("../miniprogram/utils/connectionState");
       if (modulePath.includes("medicationSafetyEvents")) return require("../miniprogram/modules/medicationSafetyEvents");
       if (modulePath.includes("personaVisibility")) return require("../miniprogram/modules/personaVisibility");
@@ -739,7 +740,7 @@ test("a same-box background failure keeps the loaded family view and marks it as
   assert.equal(page.data.carePage.phase.kind, "ready");
   assert.equal(page.data.stale, true);
   assert.deepEqual(Array.from(page.data.familyMembers, member => member.name), ["已加载成员"]);
-  assert.match(page.data.carePage.focus.supporting, /可能不是最新/);
+  assert.match(page.data.carePage.focus.supporting, /已保存/);
   assert.equal(page.data.bindValue, "box-2-draft");
   assert.equal(page.data.detailVisible, true);
   assert.equal(page.data.detailMode, "family");
@@ -1581,6 +1582,8 @@ test("voice reminder submission stays pinned to the medication box captured when
     wx: { showToast() {} },
   });
   page.data.deviceId = "old-box";
+  page.data.device = { deviceId: "old-box", online: true };
+  page.data.offlineSnapshot = false;
   page.data.deviceAccessReady = true;
   page.setData = next => Object.assign(page.data, next);
   page.load = () => {};

@@ -3,12 +3,29 @@ const realtime = require("../../utils/realtime");
 const deviceSession = require("../../utils/deviceSession");
 const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
 const medicationSafetyEvents = require("../../modules/medicationSafetyEvents");
+const offlinePageCache = require("../../utils/offlinePageCache");
 
 const riskGateway = medicationSafetyEvents.createMedicationSafetyEventModule(api);
+const RISKS_CACHE_KEY = "medication-risks";
 
 function activeDeviceId() {
   const app = getApp();
   return String((app && app.globalData && app.globalData.deviceId) || "").trim();
+}
+
+function offlineBrowsingEnabled() {
+  if (typeof getApp !== "function") return false;
+  const app = getApp();
+  return Boolean(app && app.globalData && app.globalData.offlineBrowsingEnabled === true);
+}
+
+function fallbackDevice(deviceId, reason = "") {
+  return {
+    deviceId,
+    online: false,
+    connection: { state: "unavailable", online: false, reason: String(reason || "联网后自动更新") },
+    connectionState: "unavailable",
+  };
 }
 
 function reasonText(event = {}) {
@@ -88,7 +105,7 @@ function composeRiskCarePage(device = {}, state = {}, options = {}) {
       key: "risks-blocked-list",
       intent: "tasks",
       title: "明确用药风险",
-      supporting: options.stale ? "刷新失败，当前显示的是上次同步结果。" : "",
+      supporting: options.stale ? "当前显示已保存的风险记录，连接后自动更新。" : "",
       empty: unavailable ? (state.message || "风险资料暂不可用。") : "暂无明确用药风险。",
       items: blocked.map(event => ({
         key: `risk-registry-${event.registryKey}`,
@@ -162,7 +179,7 @@ Page({
   },
 
   async load() {
-    const requestDeviceId = activeDeviceId();
+    const requestDeviceId = activeDeviceId() || "zykh-qsm-001";
     if (requestDeviceId !== String(this.data.deviceId || "").trim()) {
       this._hasLoadedSnapshot = false;
       this.setData({
@@ -175,29 +192,89 @@ Page({
     }
     const requestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = requestId;
+    const allowOfflineBrowsing = offlineBrowsingEnabled();
+    if (allowOfflineBrowsing && this._cacheHydratedDeviceId !== requestDeviceId) {
+      this._cacheHydratedDeviceId = requestDeviceId;
+      const restored = offlinePageCache.restorePage(requestDeviceId, RISKS_CACHE_KEY);
+      if (restored) {
+        this._hasLoadedSnapshot = true;
+        this.setData(restored.data);
+      }
+    }
     try {
-      const [device, riskState] = await Promise.all([
-        api.getDevice(requestDeviceId),
-        riskGateway.list({ deviceId: requestDeviceId, limit: 100, includeLocalFixtures: true }),
+      const [deviceRead, riskRead] = await Promise.all([
+        api.getDevice(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: fallbackDevice(requestDeviceId, error.message), error }),
+        ),
+        riskGateway.list({
+          deviceId: requestDeviceId,
+          limit: 100,
+          includeLocalFixtures: true,
+          allowUnavailableLocalFallback: allowOfflineBrowsing,
+        }).then(
+          value => ({ value, error: null }),
+          error => ({ value: null, error }),
+        ),
       ]);
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
+      if (riskRead.error) throw riskRead.error;
+      const device = deviceRead.value;
+      const riskState = riskRead.value;
+      const sourceStale = Boolean(deviceRead.error || riskState.availability !== "ready");
+      if (sourceStale && this.data.offlineSnapshot === true && this._hasLoadedSnapshot) {
+        this.setData({
+          carePage: offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs),
+        });
+        return;
+      }
       this._hasLoadedSnapshot = riskState.availability === "ready";
-      this.setData({
+      const lastSyncedAtMs = Date.now();
+      const nextData = {
         deviceId: requestDeviceId,
         device,
         riskState,
         hasLoadedSnapshot: this._hasLoadedSnapshot,
+        stale: sourceStale,
+        offlineSnapshot: false,
+        lastSyncedAtMs,
+        lastSyncedAtText: offlinePageCache.formatUpdatedAt(lastSyncedAtMs),
         carePage: composeRiskCarePage(device, riskState),
-      });
+      };
+      this.setData(nextData);
+      if (riskState.availability === "ready") {
+        offlinePageCache.savePage(
+          requestDeviceId,
+          RISKS_CACHE_KEY,
+          Object.assign({}, this.data, nextData),
+          { updatedAtMs: lastSyncedAtMs, quality: sourceStale ? "partial" : "complete" },
+        );
+      }
       this.consumePendingRisk();
     } catch (error) {
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
       console.warn("medication risks loading failed", error);
       if (this._hasLoadedSnapshot) {
-        this.setData({ carePage: composeRiskCarePage(this.data.device, this.data.riskState, { stale: true }) });
+        this.setData({
+          carePage: this.data.offlineSnapshot
+            ? offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs)
+            : composeRiskCarePage(this.data.device, this.data.riskState, { stale: true }),
+        });
       } else {
-        const riskState = { availability: "error", message: "风险记录读取失败，请稍后重试。", events: [] };
-        this.setData({ riskState, carePage: composeRiskCarePage(this.data.device, riskState) });
+        const riskState = medicationSafetyEvents.mergeLocalMedicationSafetyFixtures(
+          { availability: "error", message: "联网后自动更新风险记录", events: [] },
+          requestDeviceId,
+          { includeLocalFixtures: true, allowUnavailableLocalFallback: allowOfflineBrowsing },
+        );
+        const device = fallbackDevice(requestDeviceId, error.message);
+        this._hasLoadedSnapshot = true;
+        this.setData({
+          deviceId: requestDeviceId,
+          device,
+          riskState,
+          hasLoadedSnapshot: true,
+          carePage: composeRiskCarePage(device, riskState, { stale: true }),
+        });
       }
     }
   },

@@ -27,6 +27,7 @@ function loadFamilyDetailPage(api, context = {}) {
       if (modulePath.includes("dateTime")) return require("../miniprogram/utils/dateTime");
       if (modulePath.includes("carePlan")) return require("../miniprogram/utils/carePlan");
       if (modulePath.includes("carePage")) return require("../miniprogram/utils/carePage");
+      if (modulePath.includes("offlinePageCache")) return require("../miniprogram/utils/offlinePageCache");
       if (modulePath.includes("medicationSafetyEvents")) return require("../miniprogram/modules/medicationSafetyEvents");
       if (modulePath.includes("vitalsAttribution")) return require("../miniprogram/modules/vitalsAttribution");
       if (modulePath.includes("personaVisibility")) return require("../miniprogram/modules/personaVisibility");

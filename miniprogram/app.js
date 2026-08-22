@@ -3,13 +3,24 @@ const { createDeviceMembershipModule } = require("./modules/deviceMemberships");
 const { projectConnection } = require("./utils/connectionState");
 
 const CLOUD_ENV = "cloud1-d6gv6t2jf3f2c541c";
+const DEFAULT_DISPLAY_DEVICE_ID = "zykh-qsm-001";
 
-function loadingDeviceSession() {
+function displayDeviceId(...values) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+  return DEFAULT_DISPLAY_DEVICE_ID;
+}
+
+function loadingDeviceSession(displayId = "") {
   return {
     mode: "unknown",
     availability: "loading",
     devices: [],
     selectedDeviceId: "",
+    displayDeviceId: displayDeviceId(displayId),
+    displayOnly: true,
     canPair: false,
     capabilities: {},
     schemaVersion: "",
@@ -24,10 +35,12 @@ function loadingDeviceSession() {
 App({
   onLaunch() {
     const savedDeviceId = wx.getStorageSync("deviceId") || "";
+    const initialDisplayDeviceId = displayDeviceId(savedDeviceId);
     this.globalData = {
       env: CLOUD_ENV,
-      deviceId: "",
-      deviceSession: loadingDeviceSession(),
+      deviceId: initialDisplayDeviceId,
+      offlineBrowsingEnabled: true,
+      deviceSession: loadingDeviceSession(initialDisplayDeviceId),
       deviceSessionResolved: false,
       deviceSessionReady: null,
     };
@@ -35,7 +48,7 @@ App({
     if (!wx.cloud) {
       console.error("请使用 2.2.3 或以上的基础库以使用云能力");
       const error = new Error("cloud runtime unavailable");
-      this.globalData.deviceSession = Object.assign(loadingDeviceSession(), {
+      this.globalData.deviceSession = Object.assign(loadingDeviceSession(initialDisplayDeviceId), {
         availability: "error",
         message: "当前微信版本暂时无法连接药箱",
         error,
@@ -68,11 +81,20 @@ App({
     const selectedDeviceId = membershipSelectionIsAuthorized
       ? requestedDeviceId
       : "";
+    const currentDisplayDeviceId = this.globalData && this.globalData.deviceId;
+    const resolvedDisplayDeviceId = displayDeviceId(
+      selectedDeviceId,
+      state.displayDeviceId,
+      currentDisplayDeviceId,
+      wx.getStorageSync("deviceId"),
+    );
     const selectedDevice = devices.find(device => String(device && device.deviceId || "").trim() === selectedDeviceId);
     const resolvedBase = selectedDeviceId === requestedDeviceId
       ? state
       : Object.assign({}, state, { selectedDeviceId: "" });
     const resolvedState = Object.assign({}, resolvedBase, {
+      displayDeviceId: resolvedDisplayDeviceId,
+      displayOnly: !membershipSelectionIsAuthorized,
       connection: selectedDevice && selectedDevice.connection
         ? selectedDevice.connection
         : projectConnection({}, {
@@ -84,13 +106,13 @@ App({
         }),
     });
     this.globalData.deviceSession = resolvedState;
-    this.globalData.deviceId = selectedDeviceId;
+    this.globalData.deviceId = resolvedDisplayDeviceId;
     this.globalData.deviceSessionResolved = true;
 
     if (selectedDeviceId) {
       wx.setStorageSync("deviceId", selectedDeviceId);
-    } else if (resolvedState.mode === "membership") {
-      wx.removeStorageSync("deviceId");
+    } else if (!wx.getStorageSync("deviceId")) {
+      wx.setStorageSync("deviceId", resolvedDisplayDeviceId);
     }
     return resolvedState;
   },
@@ -106,8 +128,9 @@ App({
     if (!this._deviceMemberships) return this.waitForDeviceSession();
     const savedDeviceId = wx.getStorageSync("deviceId") || "";
     this.globalData.deviceSessionResolved = false;
-    this.globalData.deviceSession = loadingDeviceSession();
-    this.globalData.deviceId = "";
+    const currentDisplayDeviceId = displayDeviceId(this.globalData.deviceId, savedDeviceId);
+    this.globalData.deviceSession = loadingDeviceSession(currentDisplayDeviceId);
+    this.globalData.deviceId = currentDisplayDeviceId;
     const ready = this._deviceMemberships.resolve({ savedDeviceId })
       .then(state => this.applyDeviceSession(state));
     this.globalData.deviceSessionReady = ready;

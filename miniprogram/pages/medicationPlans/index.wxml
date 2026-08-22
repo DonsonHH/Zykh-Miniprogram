@@ -12,12 +12,6 @@
     <view class="plans-phase__text">{{phaseMessage}}</view>
   </view>
 
-  <view wx:elif="{{phase === 'error'}}" class="plans-phase ui-surface">
-    <view class="plans-phase__title">暂时无法显示</view>
-    <view class="plans-phase__text">{{phaseMessage}}</view>
-    <view class="plans-retry" bindtap="retry" hover-class="tap-feedback" hover-stay-time="80" aria-role="button" aria-label="重新读取计划">重新读取</view>
-  </view>
-
   <view wx:elif="{{phase === 'empty'}}" class="plans-phase ui-surface">
     <view class="plans-phase__title">还没有计划用药</view>
     <view class="plans-phase__text">{{phaseMessage}}</view>

@@ -41,6 +41,9 @@ function loadRecordsPage(apiOverrides = {}, context = {}) {
       if (modulePath.includes("utils/carePage")) {
         return require(path.join(__dirname, "../miniprogram/utils/carePage"));
       }
+      if (modulePath.includes("utils/offlinePageCache")) {
+        return require(path.join(__dirname, "../miniprogram/utils/offlinePageCache"));
+      }
       if (modulePath.includes("modules/medicationSafetyEvents")) {
         return require(path.join(__dirname, "../miniprogram/modules/medicationSafetyEvents"));
       }
@@ -328,7 +331,7 @@ test("records keeps the last timeline and marks it as stale when a background re
 
   assert.equal(page.data.carePage.phase.kind, "ready");
   assert.equal(page.data.feed[0].id, "vitals-vitals-kept");
-  assert.match(page.data.carePage.focus.supporting, /可能不是最新/);
+  assert.match(page.data.carePage.focus.supporting, /已保存/);
 });
 
 test("care records keep four recent rows on the page while the detail sheet keeps the full selected list", () => {

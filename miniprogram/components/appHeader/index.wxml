@@ -13,8 +13,8 @@
     <view wx:if="{{showStatus}}" class="app-header__status is-{{connectionState || (online ? 'online' : 'unavailable')}}">
       <view class="app-header__dot"></view>
       <view class="app-header__status-copy">
-        <text class="app-header__status-title">{{statusText || (connectionState === 'online' || online ? '药箱在线' : (connectionState === 'stale' ? '等待药箱连接' : (connectionState === 'loading' ? '正在确认药箱状态' : (connectionState === 'unpaired' ? '请先配对药箱' : (connectionState === 'incompatible' ? '云端版本待升级' : '药箱状态暂不可用')))))}}</text>
-        <label class="app-header__status-hint">{{statusHint || (connectionState === 'online' || online ? '同步正常' : (connectionState === 'stale' ? '可查看上次同步内容' : '请稍后重试'))}}</label>
+        <text class="app-header__status-title">{{statusText || (connectionState === 'online' || online ? '药箱在线' : (connectionState === 'loading' ? '正在更新' : '等待同步'))}}</text>
+        <label class="app-header__status-hint">{{statusHint || (connectionState === 'online' || online ? '同步正常' : '当前内容仍可浏览')}}</label>
       </view>
     </view>
   </view>

@@ -4,8 +4,12 @@ const deviceSession = require("../../utils/deviceSession");
 const {
   STORAGE_BOXES,
   filterMedicines,
+  mergeFixedMedicineBaseline,
   summarizeMedicineLibrary,
 } = require("../../utils/medicineLibrary");
+const offlinePageCache = require("../../utils/offlinePageCache");
+
+const LIBRARY_LIST_CACHE_KEY = "library-list";
 
 function medicinesForDisplay(medicines = []) {
   return Array.isArray(medicines) ? medicines : [];
@@ -14,6 +18,15 @@ function medicinesForDisplay(medicines = []) {
 function activeDeviceId() {
   const app = getApp();
   return String((app && app.globalData && app.globalData.deviceId) || "").trim();
+}
+
+function fallbackDevice(deviceId, reason = "") {
+  return {
+    deviceId,
+    online: false,
+    connection: { state: "unavailable", online: false, reason: String(reason || "联网后自动更新") },
+    connectionState: "unavailable",
+  };
 }
 
 function emptyTextFor(medicines = [], filter = "all", keyword = "") {
@@ -83,7 +96,7 @@ Page({
   },
 
   async load() {
-    const requestDeviceId = activeDeviceId();
+    const requestDeviceId = activeDeviceId() || "zykh-qsm-001";
     if (requestDeviceId !== String(this.data.deviceId || "").trim()) {
       const preserved = { box: this.data.box, filter: this.data.filter };
       this._hasLoadedSnapshot = false;
@@ -91,50 +104,104 @@ Page({
     }
     const requestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = requestId;
-    if (!requestDeviceId) {
-      const session = deviceSession.currentDeviceSession();
-      const connection = deviceSession.currentConnection();
-      this.stopRealtime();
-      this._hasLoadedSnapshot = false;
-      this.setData({
-        device: connection ? { connection, connectionState: connection.state, online: connection.online } : {},
-        initialLoading: false,
-        loadError: session.message || "请先确认当前账号可访问的家庭药箱。",
-        hasLoadedSnapshot: false,
-      });
-      return;
+    if (this._cacheHydratedDeviceId !== requestDeviceId) {
+      this._cacheHydratedDeviceId = requestDeviceId;
+      const restored = offlinePageCache.restorePage(requestDeviceId, LIBRARY_LIST_CACHE_KEY);
+      if (restored) {
+        const restoredData = Object.assign({}, restored.data, {
+          box: this.data.box,
+          filter: this.data.filter,
+          keyword: this.data.keyword,
+          refreshError: `当前显示上次同步数据 · ${restored.updatedAtText}`,
+        });
+        restoredData.viewMedicines = filterMedicines(restoredData.medicines || [], restoredData);
+        restoredData.emptyText = emptyTextFor(
+          restoredData.medicines || [],
+          restoredData.filter,
+          restoredData.keyword,
+        );
+        this._hasLoadedSnapshot = true;
+        this.setData(restoredData);
+      }
     }
     try {
-      const [device, medicines] = await Promise.all([
-        api.getDeviceStrict(requestDeviceId),
-        api.getMedicinesStrict(requestDeviceId),
+      const [deviceRead, medicineRead] = await Promise.all([
+        api.getDeviceStrict(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: this.data.device && this.data.device.deviceId === requestDeviceId ? this.data.device : fallbackDevice(requestDeviceId, error.message), error }),
+        ),
+        api.getMedicinesStrict(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: [], error }),
+        ),
       ]);
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
-      const summary = summarizeMedicineLibrary(medicinesForDisplay(medicines));
-      this._hasLoadedSnapshot = true;
-      this.setData({
+      const cloudMedicines = medicinesForDisplay(medicineRead.value);
+      const medicines = cloudMedicines.length ? cloudMedicines : mergeFixedMedicineBaseline([]);
+      const device = deviceRead.value;
+      const stale = Boolean(deviceRead.error || medicineRead.error);
+      if (stale && this.data.offlineSnapshot === true && this._hasLoadedSnapshot) {
+        this.setData({
+          stale: true,
+          refreshError: `当前显示上次同步数据 · ${this.data.lastSyncedAtText || "时间未知"}`,
+        });
+        return;
+      }
+      const summary = summarizeMedicineLibrary(medicines);
+      const lastSyncedAtMs = Date.now();
+      const viewMedicines = filterMedicines(summary.medicines, {
+        box: this.data.box,
+        filter: this.data.filter,
+        keyword: this.data.keyword,
+      });
+      const nextData = {
         deviceId: requestDeviceId,
         device,
         medicines: summary.medicines,
+        viewMedicines,
+        emptyText: emptyTextFor(summary.medicines, this.data.filter, this.data.keyword),
         initialLoading: false,
         loadError: "",
         hasLoadedSnapshot: true,
-        stale: false,
-        refreshError: "",
-      });
-      this.applyFilter();
+        stale,
+        refreshError: stale ? "当前显示家庭药品目录，联网后自动更新库存和有效期。" : "",
+        offlineSnapshot: false,
+        lastSyncedAtMs,
+        lastSyncedAtText: offlinePageCache.formatUpdatedAt(lastSyncedAtMs),
+      };
+      this._hasLoadedSnapshot = true;
+      this.setData(nextData);
+      if (!deviceRead.error || !medicineRead.error) {
+        offlinePageCache.savePage(
+          requestDeviceId,
+          LIBRARY_LIST_CACHE_KEY,
+          Object.assign({}, this.data, nextData),
+          { updatedAtMs: lastSyncedAtMs, quality: stale ? "partial" : "complete" },
+        );
+      }
     } catch (error) {
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
       console.warn("medicine list loading failed", error);
       if (!this._hasLoadedSnapshot) {
+        const summary = summarizeMedicineLibrary(mergeFixedMedicineBaseline([]));
+        this._hasLoadedSnapshot = true;
         this.setData({
+          deviceId: requestDeviceId,
+          device: fallbackDevice(requestDeviceId, error.message),
+          medicines: summary.medicines,
           initialLoading: false,
-          loadError: "药品资料读取失败，请稍后重试。",
+          loadError: "",
+          hasLoadedSnapshot: true,
+          stale: true,
+          refreshError: "当前显示家庭药品目录，联网后自动更新库存和有效期。",
         });
+        this.applyFilter();
       } else {
         this.setData({
           stale: true,
-          refreshError: "本次刷新失败，当前显示的是上次同步结果。",
+          refreshError: this.data.offlineSnapshot
+            ? `当前显示上次同步数据 · ${this.data.lastSyncedAtText || "时间未知"}`
+            : "当前显示已保存的药品资料，连接后自动更新。",
         });
       }
     }

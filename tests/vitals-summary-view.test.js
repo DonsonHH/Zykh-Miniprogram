@@ -52,6 +52,9 @@ function loadVitalsPage(apiOverrides, context = {}) {
       if (modulePath.includes("utils/carePage")) {
         return require(path.join(__dirname, "../miniprogram/utils/carePage"));
       }
+      if (modulePath.includes("utils/offlinePageCache")) {
+        return require(path.join(__dirname, "../miniprogram/utils/offlinePageCache"));
+      }
       if (modulePath.includes("utils/connectionState")) {
         return require(path.join(__dirname, "../miniprogram/utils/connectionState"));
       }
@@ -362,7 +365,7 @@ test("vitals keeps the last measurement and marks it as stale when a background 
 
   assert.equal(page.data.carePage.phase.kind, "ready");
   assert.equal(page.data.carePage.overview[0].value, "72");
-  assert.match(page.data.carePage.focus.supporting, /可能不是最新/);
+  assert.match(page.data.carePage.focus.supporting, /已保存/);
 });
 
 test("vitals summary labels partial and poor-signal readings without calling them valid", async () => {
@@ -475,7 +478,7 @@ test("vitals submits only one measurement command while a request is in progress
   let submissionCount = 0;
   let submittedPayload = null;
   const page = loadVitalsPage({
-    getDevice: async () => ({ online: false }),
+    getDevice: async () => ({ online: true }),
     getLatestVitals: async () => null,
     getRecentCommands: async () => [],
     addCommand: async (type, payload) => {

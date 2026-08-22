@@ -15,8 +15,30 @@ const vitalsAttribution = require("../../modules/vitalsAttribution");
 const personaVisibility = require("../../modules/personaVisibility");
 const { mergeCapabilitySnapshots } = require("../../modules/capabilitySnapshot");
 const { parseTimestamp } = require("../../utils/dateTime");
+const offlinePageCache = require("../../utils/offlinePageCache");
 
 const medicationSafetyEventModule = medicationSafetyEvents.createMedicationSafetyEventModule(api);
+
+function familyDetailCacheKey(scope = {}) {
+  const personId = text(scope.personId || "unknown").replace(/[^A-Za-z0-9_.-]/g, "-");
+  const generation = text(scope.personaGeneration || "current").replace(/[^A-Za-z0-9_.-]/g, "-");
+  return `family-detail-${personId}-${generation}`;
+}
+
+function fallbackDevice(deviceId, reason = "") {
+  return {
+    deviceId,
+    online: false,
+    connection: { state: "unavailable", online: false, reason: String(reason || "联网后自动更新") },
+    connectionState: "unavailable",
+  };
+}
+
+function offlineBrowsingEnabled() {
+  if (typeof getApp !== "function") return false;
+  const app = getApp();
+  return Boolean(app && app.globalData && app.globalData.offlineBrowsingEnabled === true);
+}
 
 function decoded(value) {
   try {
@@ -387,10 +409,18 @@ Page({
       this.showInvalidIdentity();
       return;
     }
-    const initialLoad = this.data.hasLoaded !== true;
+    const allowOfflineBrowsing = offlineBrowsingEnabled();
     const requestDeviceId = text(this.data.deviceId);
     const loadRequestId = (this._loadRequestId || 0) + 1;
     this._loadRequestId = loadRequestId;
+    const cacheKey = familyDetailCacheKey(scope);
+    const cacheScope = `${requestDeviceId}:${cacheKey}`;
+    if (allowOfflineBrowsing && this._cacheHydratedScope !== cacheScope) {
+      this._cacheHydratedScope = cacheScope;
+      const restored = offlinePageCache.restorePage(requestDeviceId, cacheKey);
+      if (restored) this.setData(restored.data);
+    }
+    const initialLoad = this.data.hasLoaded !== true;
     if (initialLoad) {
       this.setData({ carePage: loadingCarePage("家人照护详情", "正在整理这位家人的照护资料…") });
     }
@@ -399,7 +429,13 @@ Page({
         api.getDeviceStrict(requestDeviceId),
         api.getSnapshotStrict({ inquiryLimit: 60, deviceId: requestDeviceId }),
         api.getRecentVitalsStrict(80, requestDeviceId),
-        medicationSafetyEventModule.list({ personId: scope.personId, limit: 50, deviceId: requestDeviceId }),
+        medicationSafetyEventModule.list({
+          personId: scope.personId,
+          limit: 50,
+          deviceId: requestDeviceId,
+          includeLocalFixtures: true,
+          allowUnavailableLocalFallback: allowOfflineBrowsing,
+        }),
       ]);
       if (loadRequestId !== this._loadRequestId || text(this.data.deviceId) !== requestDeviceId) return;
       const users = snapshot.serviceUsers || [];
@@ -471,30 +507,80 @@ Page({
         safetyLoadingMore: false,
         safetyLoadMoreError: "",
         hasLoaded: true,
+        stale: false,
+        offlineSnapshot: false,
+        lastSyncedAtMs: Date.now(),
+      };
+      nextData.lastSyncedAtText = offlinePageCache.formatUpdatedAt(nextData.lastSyncedAtMs);
+      nextData.carePage = buildPersonCarePage(Object.assign({ scope, user }, nextData));
+      this.setData(nextData);
+      offlinePageCache.savePage(
+        requestDeviceId,
+        cacheKey,
+        Object.assign({}, this.data, nextData),
+        { updatedAtMs: nextData.lastSyncedAtMs },
+      );
+    } catch (error) {
+      if (loadRequestId !== this._loadRequestId || text(this.data.deviceId) !== requestDeviceId) return;
+      if (!initialLoad) {
+        if (this.data.offlineSnapshot) {
+          this.setData({
+            stale: true,
+            carePage: offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs),
+          });
+        }
+        return;
+      }
+      if (!allowOfflineBrowsing) {
+        if (isPersonaMigrationError(error)) {
+          const app = getApp();
+          const session = app && app.globalData && app.globalData.deviceSession || {};
+          this.setData({ carePage: personaMigrationCarePage("家人照护详情", session.connection) });
+          return;
+        }
+        this.setData({
+          carePage: composeCarePage({
+            key: "family-person-error",
+            title: "家人照护详情",
+            showStatus: false,
+            phase: {
+              kind: "error",
+              message: "这位家人的照护资料暂未同步，请稍后重试。",
+              action: { id: "family.person.retry", label: "重新读取照护资料" },
+            },
+          }),
+        });
+        return;
+      }
+      const user = {
+        id: scope.personId,
+        service_user_id: scope.personId,
+        personaGeneration: scope.personaGeneration,
+        name: scope.personName || "家庭成员",
+      };
+      const safetyState = medicationSafetyEvents.mergeLocalMedicationSafetyFixtures(
+        { availability: "error", events: [], message: "联网后自动更新照护资料" },
+        requestDeviceId,
+        { includeLocalFixtures: true, allowUnavailableLocalFallback: true },
+      );
+      const scopedSafetyState = Object.assign({}, safetyState, {
+        events: (safetyState.events || []).filter(event => (
+          identityMatchesScope(event.personId, event.personaGeneration, scope)
+        )),
+      });
+      const nextData = {
+        selectedUser: user,
+        device: fallbackDevice(requestDeviceId, error.message),
+        plans: [],
+        inquiries: [],
+        vitals: [],
+        safetyState: scopedSafetyState,
+        safetyLoadingMore: false,
+        safetyLoadMoreError: "",
+        hasLoaded: true,
       };
       nextData.carePage = buildPersonCarePage(Object.assign({ scope, user }, nextData));
       this.setData(nextData);
-    } catch (error) {
-      if (loadRequestId !== this._loadRequestId || text(this.data.deviceId) !== requestDeviceId) return;
-      if (!initialLoad) return;
-      if (isPersonaMigrationError(error)) {
-        const app = getApp();
-        const session = app && app.globalData && app.globalData.deviceSession || {};
-        this.setData({ carePage: personaMigrationCarePage("家人照护详情", session.connection) });
-        return;
-      }
-      this.setData({
-        carePage: composeCarePage({
-          key: "family-person-error",
-          title: "家人照护详情",
-          showStatus: false,
-          phase: {
-            kind: "error",
-            message: "这位家人的照护资料暂未同步，请稍后重试。",
-            action: { id: "family.person.retry", label: "重新读取照护资料" },
-          },
-        }),
-      });
     }
   },
 

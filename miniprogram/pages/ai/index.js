@@ -4,6 +4,9 @@ const { composeCarePage, loadingCarePage } = require("../../utils/carePage");
 const { createPersonaVisibilityPolicy } = require("../../modules/personaVisibility");
 const { runAfterDeviceSessionReady } = require("../../utils/deviceSession");
 const { parseTimestamp } = require("../../utils/dateTime");
+const offlinePageCache = require("../../utils/offlinePageCache");
+
+const INQUIRY_CACHE_KEY = "inquiries";
 
 function inquiryTimeLabel(value) {
   if (!value) return "";
@@ -129,7 +132,7 @@ function inquiryPhaseCarePage(kind, message) {
 function staleInquiryCarePage(carePage = {}) {
   const focus = carePage.focus;
   if (!focus) return carePage;
-  const warning = "刷新失败，当前问询可能不是最新";
+  const warning = "当前显示已保存的问询记录，连接后自动更新";
   const supporting = String(focus.supporting || "");
   return Object.assign({}, carePage, {
     focus: Object.assign({}, focus, {
@@ -143,6 +146,12 @@ function staleInquiryCarePage(carePage = {}) {
 function activeDeviceId() {
   const app = getApp();
   return String((app && app.globalData && app.globalData.deviceId) || "").trim();
+}
+
+function offlineBrowsingEnabled() {
+  if (typeof getApp !== "function") return false;
+  const app = getApp();
+  return Boolean(app && app.globalData && app.globalData.offlineBrowsingEnabled === true);
 }
 
 function personaPolicyForSnapshot(snapshot = {}) {
@@ -159,7 +168,36 @@ function buildInquiryCarePage(inquiryGroups = []) {
   const groups = inquiryGroups || [];
   const records = groups.reduce((all, group) => all.concat(group.inquiries || []), []);
   if (!records.length) {
-    return inquiryPhaseCarePage("empty", "暂无已完成的问询摘要。");
+    if (!offlineBrowsingEnabled()) return inquiryPhaseCarePage("empty", "暂无已完成的问询摘要。");
+    return composeCarePage({
+      key: "inquiry-empty",
+      title: "家庭问询",
+      showStatus: false,
+      focus: {
+        eyebrow: "最近问询",
+        title: "暂无已完成问询",
+        supporting: "家人在药箱端完成健康问询后，摘要会自动出现在这里。",
+        state: { kind: "muted", label: "暂无记录" },
+        activation: "none",
+      },
+      overview: [
+        { key: "inquiry-recent", label: "近期摘要", value: 0, state: "muted" },
+        { key: "inquiry-people", label: "涉及成员", value: 0, state: "muted" },
+        { key: "inquiry-attention", label: "需关注", value: 0, state: "normal" },
+      ],
+      sections: [{
+        key: "inquiry-summaries",
+        intent: "conversations",
+        title: "问询摘要",
+        supporting: "按家庭成员集中整理",
+        empty: "暂无问询摘要，联网后会自动更新。",
+        items: [],
+      }],
+      detailAction: {
+        id: "inquiry.history",
+        label: "查看全部问询历史",
+      },
+    });
   }
 
   const latestGroup = groups.find(group => (group.inquiries || []).length) || {};
@@ -292,6 +330,11 @@ Page({
     }
     const loadRequestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = loadRequestId;
+    if (offlineBrowsingEnabled() && this._cacheHydratedDeviceId !== requestDeviceId) {
+      this._cacheHydratedDeviceId = requestDeviceId;
+      const restored = offlinePageCache.restorePage(requestDeviceId, INQUIRY_CACHE_KEY);
+      if (restored) this.setData(restored.data);
+    }
     const initialLoad = this.data.hasLoaded !== true;
     if (initialLoad) {
       this.setData({
@@ -315,25 +358,53 @@ Page({
         .slice(0, 40);
 
       const inquiryGroups = decorateInquiryGroups(inquiries, { maxTotalRecords: 5 });
-      this.setData({
+      const lastSyncedAtMs = Date.now();
+      const nextData = {
         inquiryGroups,
         initialLoading: false,
         hasLoaded: true,
         loadError: "",
         stale: false,
+        offlineSnapshot: false,
+        lastSyncedAtMs,
+        lastSyncedAtText: offlinePageCache.formatUpdatedAt(lastSyncedAtMs),
         carePage: buildInquiryCarePage(inquiryGroups),
-      });
+      };
+      this.setData(nextData);
+      offlinePageCache.savePage(
+        requestDeviceId,
+        INQUIRY_CACHE_KEY,
+        Object.assign({}, this.data, nextData),
+        { updatedAtMs: lastSyncedAtMs },
+      );
     } catch (error) {
       if (loadRequestId !== this._loadRequestId
         || String(this.data.deviceId || "").trim() !== requestDeviceId
         || activeDeviceId() !== requestDeviceId) return;
       const nextData = {
         initialLoading: false,
-        loadError: initialLoad ? "问询摘要暂未同步，请稍后刷新。" : "",
-        stale: !initialLoad,
+        loadError: "",
+        stale: true,
       };
+      if (this.data.offlineSnapshot === true && this.data.hasLoaded === true) {
+        nextData.carePage = offlinePageCache.markCarePageStale(
+          this.data.carePage,
+          this.data.lastSyncedAtMs,
+        );
+        this.setData(nextData);
+        return;
+      }
       if (initialLoad) {
-        nextData.carePage = inquiryPhaseCarePage("error", nextData.loadError);
+        if (!offlineBrowsingEnabled()) {
+          nextData.loadError = "问询摘要暂未同步，请稍后刷新。";
+          nextData.stale = false;
+          nextData.carePage = inquiryPhaseCarePage("error", nextData.loadError);
+          this.setData(nextData);
+          return;
+        }
+        nextData.inquiryGroups = [];
+        nextData.hasLoaded = true;
+        nextData.carePage = staleInquiryCarePage(buildInquiryCarePage([]));
       } else {
         nextData.carePage = staleInquiryCarePage(this.data.carePage);
       }

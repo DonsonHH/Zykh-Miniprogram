@@ -6,8 +6,34 @@ const medicationSafetyEvents = require("../../modules/medicationSafetyEvents");
 const personaVisibility = require("../../modules/personaVisibility");
 const { parseTimestamp } = require("../../utils/dateTime");
 const { connectionCopy } = require("../../utils/connectionState");
+const offlinePageCache = require("../../utils/offlinePageCache");
 
 const medicationSafetyEventModule = medicationSafetyEvents.createMedicationSafetyEventModule(api);
+const FAMILY_CACHE_KEY = "family";
+
+function displayDeviceId(...values) {
+  for (const value of values) {
+    const normalized = String(value || "").trim();
+    if (normalized) return normalized;
+  }
+  return "zykh-qsm-001";
+}
+
+function offlineBrowsingEnabled() {
+  if (typeof getApp !== "function") return false;
+  const app = getApp();
+  return Boolean(app && app.globalData && app.globalData.offlineBrowsingEnabled === true);
+}
+
+function fallbackDevice(deviceId, reason = "") {
+  return {
+    deviceId,
+    online: false,
+    connection: { state: "unavailable", online: false, reason: String(reason || "联网后自动更新") },
+    connectionState: "unavailable",
+    lastSeenAt: "",
+  };
+}
 
 function reconcileSafetyRefresh(previous = {}, next = {}, deviceId = "") {
   const requestDeviceId = String(deviceId || "").trim();
@@ -292,7 +318,7 @@ function commandTime(command = {}) {
   return match ? match[1] : (value ? String(value).slice(5, 16) : "刚刚");
 }
 
-function buildFamilyCarePage({ device = {}, deviceId = "", familyMembers = [], familyPreview = [], todayCare = {}, safetyState = {}, stale = false } = {}) {
+function buildFamilyCarePage({ device = {}, deviceId = "", familyMembers = [], familyPreview = [], todayCare = {}, safetyState = {}, stale = false, lastSyncedAtText = "" } = {}) {
   const totalCount = Number(todayCare.totalCount) || 0;
   const pendingCount = Number(todayCare.pendingCount) || 0;
   const doneCount = Number(todayCare.doneCount) || 0;
@@ -305,7 +331,7 @@ function buildFamilyCarePage({ device = {}, deviceId = "", familyMembers = [], f
     ? `今天还有 ${pendingCount} 项待处理，打开可查看完整安排。`
     : (hasTodayCare ? "今天的计划均已处理，可随时回顾照护明细。" : "药箱同步新的计划后，会优先显示在这里。");
   const focusSupporting = stale
-    ? `刷新失败，当前家人与照护信息可能不是最新。${currentFocusSupporting}`
+    ? `当前显示已保存内容 · ${lastSyncedAtText || "连接后自动更新"}。${currentFocusSupporting}`
     : currentFocusSupporting;
   const safetySupporting = safetyState.stale ? safetyState.message : ({
     unsupported: "当前云端版本尚未支持安全记录",
@@ -415,6 +441,7 @@ function buildFamilyCarePage({ device = {}, deviceId = "", familyMembers = [], f
 }
 
 function deviceSessionViewData(session = {}) {
+  const allowOfflineBrowsing = offlineBrowsingEnabled();
   const mode = String(session.mode || "unknown");
   const availability = String(session.availability || "error");
   const requestedDeviceId = String(session.selectedDeviceId || "").trim();
@@ -435,8 +462,11 @@ function deviceSessionViewData(session = {}) {
   const authorizedSelection = mode === "membership"
     && availability === "ready"
     && devices.some(device => device.deviceId === requestedDeviceId);
-  const deviceAccessReady = authorizedSelection;
-  const selectedDeviceId = deviceAccessReady ? requestedDeviceId : "";
+  const selectedDeviceId = authorizedSelection
+    ? requestedDeviceId
+    : (allowOfflineBrowsing ? displayDeviceId(session.displayDeviceId, requestedDeviceId) : "");
+  const displayOnly = allowOfflineBrowsing && !authorizedSelection;
+  const deviceAccessReady = authorizedSelection || (allowOfflineBrowsing && Boolean(selectedDeviceId));
   const invalidMembershipSelection = mode === "membership"
     && availability === "ready"
     && !authorizedSelection;
@@ -454,6 +484,7 @@ function deviceSessionViewData(session = {}) {
     pairingPhase: String(session.pairing && session.pairing.phase || "idle"),
     pairingMessage: String(session.pairing && session.pairing.message || ""),
     deviceAccessReady,
+    displayOnly,
   };
 }
 
@@ -462,7 +493,7 @@ function settingsDeviceScopeIsCurrent(page, requestDeviceId, loadRequestId) {
   const normalizedDeviceId = String(requestDeviceId || "").trim();
   const pageDeviceId = String(page.data && page.data.deviceId || "").trim();
   if (pageDeviceId !== normalizedDeviceId) return false;
-  if (page.data && page.data.deviceSessionMode === "membership") {
+  if (page.data && page.data.deviceSessionMode === "membership" && page.data.displayOnly !== true) {
     if (page.data.deviceSessionAvailability !== "ready") return false;
     if (!(page.data.authorizedDevices || []).some(device => device.deviceId === normalizedDeviceId)) return false;
   }
@@ -558,6 +589,7 @@ Page({
     pairingPhase: "idle",
     pairingMessage: "",
     deviceAccessReady: false,
+    displayOnly: false,
     detailVisible: false,
     detailMode: "lines",
     detailTitle: "药箱详情",
@@ -573,16 +605,40 @@ Page({
     const sessionPending = (app.globalData && app.globalData.deviceSessionResolved === false)
       || session.availability === "loading";
     if (sessionPending && typeof app.waitForDeviceSession === "function") {
-      this._hasLoadedSnapshot = false;
-      this._loadedDeviceId = "";
-      const loadingView = deviceSessionViewData(Object.assign({}, session, {
-        mode: "unknown",
-        availability: "loading",
-        selectedDeviceId: "",
-      }));
-      this.setData(Object.assign(clearedDeviceView(""), loadingView));
-      this.stopRealtime();
-      return Promise.resolve(app.waitForDeviceSession()).then(resolvedSession => {
+      if (!offlineBrowsingEnabled()) {
+        this._hasLoadedSnapshot = false;
+        this._loadedDeviceId = "";
+        const loadingView = deviceSessionViewData(Object.assign({}, session, {
+          mode: "unknown",
+          availability: "loading",
+          selectedDeviceId: "",
+        }));
+        this.setData(Object.assign(clearedDeviceView(""), loadingView));
+        this.stopRealtime();
+        return Promise.resolve(app.waitForDeviceSession()).then(resolvedSession => {
+          if (showRequestId !== this._showRequestId) return undefined;
+          return this.activateDeviceSession(resolvedSession || {});
+        }).catch(error => {
+          if (showRequestId !== this._showRequestId) return undefined;
+          console.warn("device session loading failed", error);
+          return this.activateDeviceSession({
+            mode: "unknown",
+            availability: "error",
+            devices: [],
+            selectedDeviceId: "",
+            canPair: false,
+            message: "暂时无法确认账号可访问的药箱",
+          });
+        });
+      }
+      const initialSession = Object.assign({}, session, {
+        displayDeviceId: displayDeviceId(
+          session.displayDeviceId,
+          app.globalData && app.globalData.deviceId,
+        ),
+      });
+      const initialLoad = this.activateDeviceSession(initialSession);
+      Promise.resolve(app.waitForDeviceSession()).then(resolvedSession => {
         if (showRequestId !== this._showRequestId) return undefined;
         return this.activateDeviceSession(resolvedSession || {});
       }).catch(error => {
@@ -593,10 +649,12 @@ Page({
           availability: "error",
           devices: [],
           selectedDeviceId: "",
+          displayDeviceId: displayDeviceId(app.globalData && app.globalData.deviceId),
           canPair: false,
           message: "暂时无法确认账号可访问的药箱",
         });
       });
+      return initialLoad;
     }
     return this.activateDeviceSession(session);
   },
@@ -657,10 +715,13 @@ Page({
 
   async load() {
     const requestDeviceId = String(this.data.deviceId || "").trim();
+    const allowOfflineBrowsing = offlineBrowsingEnabled();
     const membershipRequestAuthorized = this.data.deviceSessionMode === "membership"
       && this.data.deviceSessionAvailability === "ready"
       && (this.data.authorizedDevices || []).some(device => device.deviceId === requestDeviceId);
-    if (this.data.deviceSessionMode === "membership" && !membershipRequestAuthorized) {
+    if (this.data.deviceSessionMode === "membership"
+      && this.data.displayOnly !== true
+      && !membershipRequestAuthorized) {
       this._loadRequestId = (this._loadRequestId || 0) + 1;
       this._hasLoadedSnapshot = false;
       this._loadedDeviceId = "";
@@ -684,21 +745,62 @@ Page({
     }
     const loadRequestId = (this._loadRequestId || 0) + 1;
     this._loadRequestId = loadRequestId;
+    if (allowOfflineBrowsing && this._cacheHydratedDeviceId !== requestDeviceId) {
+      this._cacheHydratedDeviceId = requestDeviceId;
+      const restored = offlinePageCache.restorePage(requestDeviceId, FAMILY_CACHE_KEY);
+      if (restored) {
+        const sessionFields = deviceSessionViewData({
+          mode: this.data.deviceSessionMode,
+          availability: this.data.deviceSessionAvailability,
+          devices: this.data.authorizedDevices,
+          selectedDeviceId: requestDeviceId,
+          displayDeviceId: requestDeviceId,
+          canPair: this.data.canPair,
+          message: this.data.deviceSessionMessage,
+        });
+        this._hasLoadedSnapshot = true;
+        this._loadedDeviceId = requestDeviceId;
+        this.setData(Object.assign({}, restored.data, sessionFields, {
+          deviceId: requestDeviceId,
+          deviceAccessReady: true,
+          displayOnly: this.data.displayOnly === true,
+        }));
+      }
+    }
     try {
-      const latestDevice = await api.getDeviceStrict(requestDeviceId);
-      const [snapshotRead, commandRead, safetyRead] = await Promise.all([
+      const [deviceRead, snapshotRead, commandRead, safetyRead] = await Promise.all([
+        api.getDeviceStrict(requestDeviceId)
+          .then(value => ({ value }), error => ({
+            value: fallbackDevice(requestDeviceId, error.message),
+            error,
+          })),
         api.getSnapshotStrict({ inquiryLimit: 10, deviceId: requestDeviceId })
-          .then(value => ({ value }), error => ({ error })),
+          .then(value => ({ value }), error => ({
+            value: { serviceUsers: [], plans: [], capabilities: {} },
+            error,
+          })),
         api.getRecentCommandsStrict(6, requestDeviceId)
-          .then(value => ({ value }), error => ({ error })),
-        medicationSafetyEventModule.list({ limit: 50, deviceId: requestDeviceId })
-          .then(value => ({ value }), error => ({ error })),
+          .then(value => ({ value }), error => ({ value: [], error })),
+        medicationSafetyEventModule.list({
+          limit: 50,
+          deviceId: requestDeviceId,
+          includeLocalFixtures: true,
+          allowUnavailableLocalFallback: allowOfflineBrowsing,
+        }).then(value => ({ value }), error => ({
+          value: medicationSafetyEvents.mergeLocalMedicationSafetyFixtures(
+            { availability: "error", events: [], message: "联网后自动更新风险记录" },
+            requestDeviceId,
+            { includeLocalFixtures: true, allowUnavailableLocalFallback: allowOfflineBrowsing },
+          ),
+          error,
+        })),
       ]);
       if (!settingsDeviceScopeIsCurrent(this, requestDeviceId, loadRequestId)) return;
       const migrationError = [snapshotRead.error, commandRead.error, safetyRead.error]
         .filter(Boolean)
         .find(isPersonaMigrationError);
-      if (migrationError) {
+      if (!allowOfflineBrowsing && migrationError) {
+        const latestDevice = deviceRead.value;
         this.setData({
           device: latestDevice,
           deviceId: requestDeviceId,
@@ -721,14 +823,29 @@ Page({
         this._loadedDeviceId = requestDeviceId;
         return;
       }
-      const readError = [snapshotRead.error, commandRead.error, safetyRead.error].filter(Boolean)[0];
-      if (readError) throw readError;
+      const strictReadError = [deviceRead.error, snapshotRead.error, commandRead.error, safetyRead.error]
+        .find(Boolean);
+      if (!allowOfflineBrowsing && strictReadError) throw strictReadError;
+      const latestDevice = deviceRead.value;
       const snapshot = snapshotRead.value;
       const commands = commandRead.value;
       const safetyState = safetyRead.value;
+      const sourceStale = [deviceRead.error, snapshotRead.error, commandRead.error, safetyRead.error]
+        .some(Boolean);
+      if (sourceStale
+        && this.data.offlineSnapshot === true
+        && this._hasLoadedSnapshot === true
+        && String(this._loadedDeviceId || "").trim() === requestDeviceId) {
+        this.setData({
+          stale: true,
+          carePage: offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs),
+        });
+        return;
+      }
       const returnedDevice = latestDevice || {};
       const returnedDeviceId = String(returnedDevice.deviceId || "").trim();
       if (this.data.deviceSessionMode === "membership"
+        && this.data.displayOnly !== true
         && returnedDeviceId
         && returnedDeviceId !== requestDeviceId) {
         const error = new Error("membership snapshot device does not match the authorized request");
@@ -764,7 +881,7 @@ Page({
         familyMembers,
         familyPreview,
         safetyState: reconciledSafetyState,
-        stale: false,
+        stale: sourceStale,
         todayCare,
         todayCareLines: todayCare.lines,
         commands: (commands || []).map(item => {
@@ -781,11 +898,28 @@ Page({
         detailTitle: isSameDeviceRefresh ? this.data.detailTitle : "药箱详情",
         detailLines: isSameDeviceRefresh ? this.data.detailLines : [],
         detailMembers: isSameDeviceRefresh ? this.data.detailMembers : [],
+        offlineSnapshot: false,
+        lastSyncedAtMs: Date.now(),
       };
+      nextData.lastSyncedAtText = offlinePageCache.formatUpdatedAt(nextData.lastSyncedAtMs);
       nextData.carePage = buildFamilyCarePage(nextData);
       this.setData(nextData);
       this._hasLoadedSnapshot = true;
       this._loadedDeviceId = requestDeviceId;
+      const successfulReadCount = [
+        deviceRead.error,
+        snapshotRead.error,
+        commandRead.error,
+        safetyRead.error,
+      ].filter(error => !error).length;
+      if (successfulReadCount > 0) {
+        offlinePageCache.savePage(
+          requestDeviceId,
+          FAMILY_CACHE_KEY,
+          Object.assign({}, this.data, nextData),
+          { updatedAtMs: nextData.lastSyncedAtMs, quality: sourceStale ? "partial" : "complete" },
+        );
+      }
     } catch (error) {
       if (!settingsDeviceScopeIsCurrent(this, requestDeviceId, loadRequestId)) return;
       console.warn("family care loading failed", error);
@@ -797,26 +931,53 @@ Page({
         const stale = true;
         this.setData({
           stale,
-          carePage: buildFamilyCarePage(Object.assign({}, this.data, { stale })),
+          carePage: this.data.offlineSnapshot
+            ? offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs)
+            : buildFamilyCarePage(Object.assign({}, this.data, { stale })),
         });
         return;
       }
       this._hasLoadedSnapshot = false;
       this._loadedDeviceId = "";
-      this.setData({
-        stale: false,
-        carePage: composeCarePage({
-          key: "family-care-error",
-          title: "家人和药箱",
-          online: Boolean(this.data.device && this.data.device.online),
-          connection: this.data.device && this.data.device.connection,
-          phase: {
-            kind: "error",
-            message: "家人与药箱信息暂未同步，请稍后刷新。",
-            action: { id: "family.retry", label: "重新读取家人与药箱" },
-          },
-        }),
+      if (!allowOfflineBrowsing) {
+        this.setData({
+          stale: false,
+          carePage: composeCarePage({
+            key: "family-care-error",
+            title: "家人和药箱",
+            online: Boolean(this.data.device && this.data.device.online),
+            connection: this.data.device && this.data.device.connection,
+            phase: {
+              kind: "error",
+              message: "家人与药箱信息暂未同步，请稍后刷新。",
+              action: { id: "family.retry", label: "重新读取家人与药箱" },
+            },
+          }),
+        });
+        return;
+      }
+      const device = fallbackDevice(requestDeviceId, error.message);
+      const safetyState = medicationSafetyEvents.mergeLocalMedicationSafetyFixtures(
+        { availability: "error", events: [], message: "联网后自动更新风险记录" },
+        requestDeviceId,
+        { includeLocalFixtures: true, allowUnavailableLocalFallback: true },
+      );
+      const todayCare = buildTodayCareOverview([], []);
+      const fallbackData = Object.assign({}, this.data, {
+        device,
+        deviceId: requestDeviceId,
+        familyMembers: [],
+        familyPreview: [],
+        safetyState,
+        todayCare,
+        todayCareLines: [],
+        commands: [],
+        stale: true,
       });
+      fallbackData.carePage = buildFamilyCarePage(fallbackData);
+      this._hasLoadedSnapshot = true;
+      this._loadedDeviceId = requestDeviceId;
+      this.setData(fallbackData);
     }
   },
 
@@ -1037,6 +1198,10 @@ Page({
     const requestDeviceId = String(this.data.deviceId || "").trim();
     if (!requestDeviceId || !settingsDeviceScopeIsCurrent(this, requestDeviceId)) {
       wx.showToast({ title: "药箱授权已变化，请重新选择", icon: "none" });
+      return;
+    }
+    if (this.data.offlineSnapshot || !(this.data.device && this.data.device.online)) {
+      wx.showToast({ title: "药箱在线后可发送提醒", icon: "none" });
       return;
     }
     try {

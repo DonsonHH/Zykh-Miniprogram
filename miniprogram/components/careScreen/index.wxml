@@ -3,15 +3,15 @@
     title="{{model.title || '智药康护'}}"
     eyebrow=""
     online="{{model.online}}"
-    connection-state="{{model.connectionState}}"
-    status-text="{{model.connectionStatusText}}"
-    status-hint="{{model.connectionStatusHint}}"
+    connection-state="{{model.connectionState || ''}}"
+    status-text="{{model.connectionStatusText || ''}}"
+    status-hint="{{model.connectionStatusHint || ''}}"
     show-status="{{model.showStatus}}"
   />
 
   <view wx:if="{{model.phase.kind !== 'ready'}}" class="care-phase care-surface">
     <view wx:if="{{model.phase.kind === 'loading'}}" class="care-spinner"></view>
-    <view class="care-phase__title">{{model.phase.kind === 'error' ? '暂时无法显示' : (model.phase.kind === 'empty' ? '暂无内容' : '正在加载')}}</view>
+    <view class="care-phase__title">{{model.phase.kind === 'error' ? '内容等待更新' : (model.phase.kind === 'empty' ? '暂无内容' : '正在加载')}}</view>
     <view class="care-phase__message">{{model.phase.message}}</view>
     <button
       wx:if="{{model.phase.action}}"

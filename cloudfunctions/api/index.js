@@ -4,13 +4,26 @@ const {
   createMedicationSafetyEventModule,
 } = require("./medicationSafetyEvents");
 const { createMembershipModule } = require("./memberships");
-const { createSnapshotStore } = require("./snapshotStore");
+const {
+  cleanSnapshotRow,
+  createSnapshotStore,
+  medicineRowIdentity,
+} = require("./snapshotStore");
+const {
+  CANONICAL_DIGEST_VERSION,
+  canonicalSnapshotDigest,
+} = require("./canonicalDigest");
 
 cloud.init({ env: cloud.DYNAMIC_CURRENT_ENV });
 
 const db = cloud.database();
 const schemaRevision = "3.0-three-box-library";
 const capabilities = Object.freeze({
+  medicationSafetyEvents: "v1",
+  inquiryDetail: "v1",
+  medicationRiskRegistry: "v1",
+  personaLifecycle: "v1",
+  vitalsAttribution: "v1",
   snapshotBatch: "v2",
   snapshotFencing: "v1",
   snapshotCanonicalDigest: "jcs-sha256-v1",
@@ -18,6 +31,34 @@ const capabilities = Object.freeze({
   explicitInventoryState: "v1",
   medicineStorageBoxes: "v1",
   caregiverMembership: "v1",
+});
+
+// The existing cloud collection predates the three-box manifest. Keep this
+// deterministic bridge until Station publishes its first finalized snapshot.
+const legacyMedicineManifestMap = Object.freeze({
+  "slot-01-fufang-ganmaoling": ["slot-01-fufang-ganmaoling", "DAILY"],
+  "slot-02-centrum": ["slot-02-centrum", "PRESCRIPTION"],
+  "slot-03-diosmectite": ["slot-13-montmorillonite", "DAILY"],
+  "slot-04-amoxicillin": ["slot-04-amoxicillin", "PRESCRIPTION"],
+  "slot-05-nin-jiom-pei-pa-koa": ["slot-05-nin-jiom-pei-pa-koa", "DAILY"],
+  "slot-06-lactulose": ["slot-06-lactulose", "PRESCRIPTION"],
+  "slot-07-yinhuang": ["slot-07-yinhuang", "DAILY"],
+  "slot-08-huoxiang-zhengqi": ["slot-08-huoxiang-zhengqi", "DAILY"],
+  "slot-09-bifid-triple": ["slot-09-bifid-triple", "PRESCRIPTION"],
+  "slot-10-gauze": ["slot-10-gauze", "CARE"],
+  "slot-11-guilin-xiguashuang": ["slot-11-guilin-xiguashuang", "DAILY"],
+  "slot-12-hydrotalcite": ["slot-12-hydrotalcite", "DAILY"],
+  "slot-13-ibuprofen": ["slot-03-ibuprofen", "DAILY"],
+  "slot-14-oseltamivir": ["slot-14-oseltamivir", "PRESCRIPTION"],
+  "slot-15-mupirocin": ["slot-15-mupirocin", "CARE"],
+  "slot-16-ketoconazole": ["slot-16-ketoconazole", "CARE"],
+  "slot-17-iodophor": ["slot-17-iodophor", "CARE"],
+  "slot-18-budesonide-nasal": ["slot-18-budesonide-nasal", "CARE"],
+  "slot-19-ketoprofen-gel": ["slot-19-ketoprofen-gel", "CARE"],
+  "slot-20-bandage": ["slot-20-bandage", "CARE"],
+  "slot-21-amlodipine": ["slot-21-amlodipine", "PRESCRIPTION"],
+  "slot-22-cotton-swab": ["slot-22-cotton-swab", "CARE"],
+  "slot-23-desloratadine": ["slot-23-desloratadine", "DAILY"],
 });
 
 const collections = {
@@ -102,19 +143,6 @@ const readActionPermissions = Object.freeze({
   LIST_RECORDS: "READ_RECORD",
   LIST_VITALS: "READ_VITALS",
 });
-
-const releaseAPersonaReadActions = new Set([
-  "GET_LATEST_VITALS",
-  "LIST_VITALS",
-  "LIST_RECORDS",
-  "LIST_COMMANDS",
-  "LIST_INQUIRIES",
-  "GET_INQUIRY_DETAIL",
-  "GET_SNAPSHOT",
-  "LIST_MEDICATION_SAFETY_EVENTS",
-  "GET_MEDICATION_SAFETY_EVENT",
-  "MARK_MEDICATION_SAFETY_EVENT_READ",
-]);
 
 const allowedCommandTypes = new Set([
   "AUDIO_BEEP",
@@ -625,6 +653,81 @@ async function listAllDeviceRows(collection, deviceId, maximum = 2000) {
     if (batch.length < 100) break;
   }
   return rows;
+}
+
+function transitionalMedicineRow(row = {}) {
+  const source = cleanData(row);
+  const legacyId = String(firstPresent(
+    source.medicineId,
+    source.medicine_id,
+    source.id,
+  ) || "").trim();
+  const mapping = legacyMedicineManifestMap[legacyId];
+  if (!mapping) throw actionError("LEGACY_MEDICINE_MAPPING_REQUIRED");
+  const medicineId = mapping[0];
+  const storageBox = mapping[1];
+  return cleanSnapshotRow(Object.assign({}, source, {
+    medicineId,
+    medicine_id: medicineId,
+    storageBox,
+    storage_box: storageBox,
+  }));
+}
+
+async function transitionalMedicineSnapshot(deviceId) {
+  const rows = (await listAllDeviceRows(collections.medicines, deviceId))
+    .map(transitionalMedicineRow)
+    .sort((left, right) => (
+      medicineRowIdentity(left).medicineId.localeCompare(medicineRowIdentity(right).medicineId)
+    ));
+  if (!rows.length) throw actionError("MEDICINE_SNAPSHOT_NOT_FOUND");
+  const digest = canonicalSnapshotDigest(
+    deviceId,
+    "medicines",
+    rows,
+    row => medicineRowIdentity(row).medicineId,
+  );
+  const finalizedAt = rows.reduce((latest, row) => (
+    String(row.updatedAt || "") > latest ? String(row.updatedAt || "") : latest
+  ), "");
+  return {
+    boardMedicineSnapshot: "v1",
+    protocol: "boardMedicineSnapshot:v1",
+    deviceId,
+    kind: "medicines",
+    snapshotId: `legacy-cloud-${safeId(deviceId)}-medicines-r1`,
+    revision: 1,
+    snapshotRevision: 1,
+    digest,
+    canonicalDigestVersion: CANONICAL_DIGEST_VERSION,
+    snapshotComplete: true,
+    rowCount: rows.length,
+    finalizedAt,
+    finalizedAtEpochMs: 0,
+    versionState: "TRANSITIONAL_LEGACY",
+    rows,
+  };
+}
+
+function versionedMedicineSnapshotUnavailable(error) {
+  const code = String((error && (error.code ?? error.errCode)) || "").toUpperCase();
+  const message = String((error && (error.message || error.errMsg)) || error || "");
+  if (code === "MEDICINE_SNAPSHOT_NOT_FOUND") return true;
+  const missingCollection = code === "DATABASE_COLLECTION_NOT_EXIST"
+    || code === "-502005"
+    || /DATABASE_COLLECTION_NOT_EXIST|DB OR TABLE NOT EXIST|DATABASE COLLECTION NOT EXISTS/i.test(message);
+  return missingCollection && /snapshot_(?:heads|manifests|rows|sessions)/i.test(message);
+}
+
+async function caregiverMedicineSnapshot(data = {}) {
+  try {
+    return await snapshots.readMedicineSnapshot(data.deviceId, data);
+  } catch (error) {
+    const explicitVersion = data.snapshotId || data.snapshot_id
+      || data.snapshotRevision || data.snapshot_revision || data.revision || data.digest;
+    if (explicitVersion || !versionedMedicineSnapshotUnavailable(error)) throw error;
+    return transitionalMedicineSnapshot(data.deviceId);
+  }
 }
 
 async function replaceDeviceRows(collection, deviceId, rows, idForRow, kind = "") {
@@ -1404,9 +1507,6 @@ async function handleAction(payload, wxContext, isHttp = false) {
       }
     }
   }
-  if (releaseAPersonaReadActions.has(action)) {
-    throw actionError("PERSONA_DATA_MIGRATION_IN_PROGRESS");
-  }
   if (action === "CREATE_COMMAND") {
     requireMiniprogramIdentity(wxContext, isHttp);
     throw actionError("REMOTE_COMMANDS_DISABLED");
@@ -1428,6 +1528,9 @@ async function handleAction(payload, wxContext, isHttp = false) {
     case "GET_MY_DEVICES": return memberships.listMyDevices({
       openId: requireMiniprogramIdentity(wxContext, isHttp),
     });
+    case "LIST_MEDICATION_SAFETY_EVENTS": return medicationSafetyEvents.list(data, wxContext);
+    case "GET_MEDICATION_SAFETY_EVENT": return medicationSafetyEvents.get(data, wxContext);
+    case "MARK_MEDICATION_SAFETY_EVENT_READ": return medicationSafetyEvents.markRead(data, wxContext);
     case "GET_DEVICE": {
       try {
         const result = await db.collection(collections.devices).doc(data.deviceId).get();
@@ -1442,8 +1545,35 @@ async function handleAction(payload, wxContext, isHttp = false) {
         throw actionError("DATABASE_REQUEST_FAILED");
       }
     }
-    case "GET_MEDICINE_SNAPSHOT": return snapshots.readMedicineSnapshot(data.deviceId, data);
-    case "LIST_MEDICINES": return snapshots.listMedicines(data.deviceId);
+    case "GET_MEDICINE_SNAPSHOT": return caregiverMedicineSnapshot(data);
+    case "LIST_MEDICINES": return (await caregiverMedicineSnapshot(data)).rows;
+    case "GET_LATEST_VITALS": return (
+      await listVitals(Object.assign({}, data, { limit: 1 }), readMembership)
+    )[0] || null;
+    case "LIST_VITALS": return listVitals(data, readMembership);
+    case "LIST_RECORDS": return scopedRows(
+      collections.records,
+      data,
+      readMembership,
+      "createdAt",
+      "desc",
+      "records",
+    );
+    case "LIST_COMMANDS": return scopedRows(
+      collections.commands,
+      data,
+      readMembership,
+      "updatedAt",
+      "desc",
+      "commands",
+    );
+    case "LIST_INQUIRIES": return rowsVisibleToMembership(
+      await listInquiries(Object.assign({}, data, { limit: 2000 })),
+      readMembership,
+      "inquiries",
+    ).slice(0, requestedLimit(data, 100));
+    case "GET_INQUIRY_DETAIL": return getInquiryDetail(data, readMembership);
+    case "GET_SNAPSHOT": return snapshotVisibleToMembership(data, readMembership);
     default: throw new Error(`unknown action: ${action}`);
   }
 }

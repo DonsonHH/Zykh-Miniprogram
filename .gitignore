@@ -19,6 +19,7 @@ coverage/
 device-secrets.json
 
 # Local tooling and evidence
+artifacts/
 .codex-tools/
 .codex-artifacts/
 .runtime-evidence/

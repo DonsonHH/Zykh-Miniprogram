@@ -102,6 +102,7 @@ function loadHomePage(snapshot, vitals = [], wx = {}, medicines = [], expirySumm
       }
       if (modulePath.includes("utils/carePage")) return require("../miniprogram/utils/carePage");
       if (modulePath.includes("utils/carePlan")) return require("../miniprogram/utils/carePlan");
+      if (modulePath.includes("utils/offlinePageCache")) return require("../miniprogram/utils/offlinePageCache");
       if (modulePath.includes("utils/medicineLibrary")) return require("../miniprogram/utils/medicineLibrary");
       if (modulePath.includes("utils/cabinetView")) return require("../miniprogram/utils/cabinetView");
       if (modulePath.includes("modules/medicationSafetyEvents")) {
@@ -226,7 +227,7 @@ test("the dashboard keeps its last care snapshot and marks it stale when a refre
 
   assert.equal(page.data.carePage.focus.title, focusTitle);
   assert.deepEqual(Array.from(page.data.todoItems, item => item.id), todoIds);
-  assert.match(page.data.carePage.focus.supporting, /可能不是最新/);
+  assert.match(page.data.carePage.focus.supporting, /已保存/);
 });
 
 test("switching medication boxes clears the old dashboard and cannot send its reminder to the new box", async () => {
@@ -782,7 +783,7 @@ test("a transient safety refresh failure keeps the last unread attention and mar
 
   assert.equal(page.data.safetyState.availability, "error");
   assert.equal(page.data.stale, true);
-  assert.match(page.data.carePage.focus.supporting, /可能不是最新/);
+  assert.match(page.data.carePage.focus.supporting, /已保存/);
   const attention = page.data.carePage.sections.find(section => section.key === "home-attention");
   const safetyItem = attention.items.find(item => item.key === "home-attention-safety");
   assert.equal(safetyItem.action.id, "home.risks");

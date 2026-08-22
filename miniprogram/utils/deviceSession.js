@@ -1,6 +1,10 @@
 function runAfterDeviceSessionReady(callback) {
   const app = typeof getApp === "function" ? getApp() : null;
   const globalData = app && app.globalData || {};
+  // A known household scope is enough to render local/cache-backed pages.
+  // Cloud membership resolution continues in the background and only gates
+  // remote writes, never the browsing experience.
+  if (String(globalData.deviceId || "").trim()) return callback();
   if (globalData.deviceSessionResolved !== true
     && app
     && typeof app.waitForDeviceSession === "function") {

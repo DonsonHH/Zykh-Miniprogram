@@ -1,18 +1,27 @@
 const api = require("../../utils/api");
 const realtime = require("../../utils/realtime");
 const {
-  currentConnection,
-  currentDeviceSession,
-  isPersonaMigrationError,
   runAfterDeviceSessionReady,
 } = require("../../utils/deviceSession");
 const planStatus = require("../../utils/carePlan");
 const { isPlanDueToday } = planStatus;
 const personaVisibility = require("../../modules/personaVisibility");
+const offlinePageCache = require("../../utils/offlinePageCache");
+
+const PLANS_CACHE_KEY = "medication-plans";
 
 function activeDeviceId() {
   const app = getApp();
   return String((app && app.globalData && app.globalData.deviceId) || "").trim();
+}
+
+function fallbackDevice(deviceId, reason = "") {
+  return {
+    deviceId,
+    online: false,
+    connection: { state: "unavailable", online: false, reason: String(reason || "联网后自动更新") },
+    connectionState: "unavailable",
+  };
 }
 
 function firstPresent(...values) {
@@ -99,52 +108,37 @@ Page({
   },
 
   async load() {
-    const requestDeviceId = activeDeviceId();
+    const requestDeviceId = activeDeviceId() || "zykh-qsm-001";
     const requestId = Number(this._requestId || 0) + 1;
     this._requestId = requestId;
+    if (this._cacheHydratedDeviceId !== requestDeviceId) {
+      this._cacheHydratedDeviceId = requestDeviceId;
+      const restored = offlinePageCache.restorePage(requestDeviceId, PLANS_CACHE_KEY);
+      if (restored) this.setData(restored.data);
+    }
     this.setData({
-      dateText: todayLabel(),
-      phase: this.data.plans.length ? this.data.phase : "loading",
-      phaseMessage: "正在读取今日计划…",
-      headerSubtitle: "正在同步今日安排",
+      dateText: this.data.offlineSnapshot ? this.data.dateText : todayLabel(),
+      phase: this.data.offlineSnapshot ? "ready" : (this.data.plans.length ? this.data.phase : "loading"),
+      phaseMessage: this.data.offlineSnapshot
+        ? `当前显示上次同步数据 · ${this.data.lastSyncedAtText || "时间未知"}`
+        : "正在读取今日计划…",
+      headerSubtitle: this.data.offlineSnapshot ? this.data.headerSubtitle : "正在同步今日安排",
     });
 
-    if (!requestDeviceId) {
-      const session = currentDeviceSession();
-      const connection = currentConnection();
-      this.stopRealtime();
-      this.setData({
-        phase: "empty",
-        phaseMessage: session.message || "请先在“家人”页面确认已配对的药箱。",
-        plans: [],
-        counts: { total: 0, taken: 0, remind: 0, notDue: 0 },
-        headerSubtitle: connection && connection.state === "incompatible" ? "云端版本待升级" : "尚未连接药箱",
-        deviceOnline: connection ? connection.online : null,
-        deviceConnectionState: connection ? connection.state : "unpaired",
-      });
-      return;
-    }
-
     try {
-      const device = await api.getDeviceStrict(requestDeviceId);
-      let snapshot;
-      try {
-        snapshot = await api.getSnapshotStrict({ inquiryLimit: 1, deviceId: requestDeviceId });
-      } catch (error) {
-        if (!isPersonaMigrationError(error)) throw error;
-        if (requestId !== this._requestId || activeDeviceId() !== requestDeviceId) return;
-        this.setData({
-          phase: "empty",
-          phaseMessage: "家人的用药计划正在安全迁移，完成后会自动恢复显示。",
-          plans: [],
-          counts: { total: 0, taken: 0, remind: 0, notDue: 0 },
-          headerSubtitle: "照护资料迁移中",
-          deviceOnline: api.isDeviceOnline(device),
-          deviceConnectionState: device.connectionState || "unavailable",
-        });
-        return;
-      }
+      const [deviceRead, snapshotRead] = await Promise.all([
+        api.getDeviceStrict(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: fallbackDevice(requestDeviceId, error.message), error }),
+        ),
+        api.getSnapshotStrict({ inquiryLimit: 1, deviceId: requestDeviceId }).then(
+          value => ({ value, error: null }),
+          error => ({ value: { serviceUsers: [], plans: [], capabilities: {} }, error }),
+        ),
+      ]);
       if (requestId !== this._requestId || activeDeviceId() !== requestDeviceId) return;
+      const device = deviceRead.value;
+      const snapshot = snapshotRead.value;
 
       const serviceUsers = snapshot.serviceUsers || [];
       const policy = personaVisibility.createPersonaVisibilityPolicy(serviceUsers, {
@@ -157,24 +151,51 @@ Page({
       const rows = buildPlanRows(visiblePlans, serviceUsers, new Date());
       const counts = planStatus.summarizePlanViews(rows);
       const online = api.isDeviceOnline(device);
-      this.setData({
+      const stale = Boolean(deviceRead.error || snapshotRead.error);
+      if (stale && this.data.offlineSnapshot === true) {
+        this.setData({
+          phase: "ready",
+          phaseMessage: `当前显示上次同步数据 · ${this.data.lastSyncedAtText || "时间未知"}`,
+          lastUpdatedText: `上次同步 · ${this.data.lastSyncedAtText || "时间未知"}`,
+          deviceOnline: false,
+          deviceConnectionState: "stale",
+        });
+        return;
+      }
+      const lastSyncedAtMs = Date.now();
+      const nextData = {
         phase: "ready",
-        phaseMessage: "",
+        phaseMessage: stale ? "联网后自动更新今日计划。" : "",
         deviceOnline: online,
         deviceConnectionState: device.connectionState || (online ? "online" : "unavailable"),
         plans: rows,
         counts,
         dateText: todayLabel(),
         headerSubtitle: counts.total ? `今日共 ${counts.total} 项计划` : "今日暂无计划",
-        lastUpdatedText: "刚刚同步",
-      });
+        lastUpdatedText: stale ? "等待同步" : "刚刚同步",
+        offlineSnapshot: false,
+        lastSyncedAtMs,
+        lastSyncedAtText: offlinePageCache.formatUpdatedAt(lastSyncedAtMs),
+      };
+      this.setData(nextData);
+      if (!deviceRead.error || !snapshotRead.error) {
+        offlinePageCache.savePage(
+          requestDeviceId,
+          PLANS_CACHE_KEY,
+          Object.assign({}, this.data, nextData),
+          { updatedAtMs: lastSyncedAtMs, quality: stale ? "partial" : "complete" },
+        );
+      }
     } catch (error) {
       if (requestId !== this._requestId || activeDeviceId() !== requestDeviceId) return;
       console.warn("medication plans loading failed", error);
       this.setData({
-        phase: "error",
-        phaseMessage: "计划暂时无法读取，请检查网络后重试。",
-        headerSubtitle: "同步失败",
+        phase: "ready",
+        phaseMessage: "联网后自动更新今日计划。",
+        plans: [],
+        counts: { total: 0, taken: 0, remind: 0, notDue: 0 },
+        headerSubtitle: "今日暂无计划",
+        lastUpdatedText: "等待同步",
         deviceOnline: null,
         deviceConnectionState: "unavailable",
       });

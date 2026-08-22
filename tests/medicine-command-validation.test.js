@@ -12,6 +12,11 @@ const {
 const DEVICE_ID = "station-001";
 const DEVICE_SECRET = "test-only-device-secret-at-least-32-bytes";
 const RELEASE_A_CAPABILITIES = {
+  medicationSafetyEvents: "v1",
+  inquiryDetail: "v1",
+  medicationRiskRegistry: "v1",
+  personaLifecycle: "v1",
+  vitalsAttribution: "v1",
   snapshotBatch: "v2",
   snapshotFencing: "v1",
   snapshotCanonicalDigest: "jcs-sha256-v1",
@@ -55,7 +60,7 @@ function boardData(extra = {}) {
   return Object.assign({ deviceId: DEVICE_ID, deviceSecret: DEVICE_SECRET }, extra);
 }
 
-test("Release A PING declares only implemented heartbeats and medicine snapshot capabilities", { concurrency: false }, async () => {
+test("PING declares versioned medicine sync plus caregiver read capabilities", { concurrency: false }, async () => {
   const { api } = loadCloudApi();
   const result = await api.main({ action: "PING", data: {} });
   assert.equal(result.ok, true);
@@ -219,7 +224,7 @@ test("GET_DEVICE returns server heartbeat age and preserves database errors", { 
   assert.equal(missing.code, "NOT_FOUND");
 });
 
-test("Release A keeps persona, pairing and remote command paths closed", { concurrency: false }, async () => {
+test("pairing, remote commands and legacy board writes remain closed", { concurrency: false }, async () => {
   const { api } = loadCloudApi();
   const remote = await api.main({
     action: "CREATE_COMMAND",
@@ -239,4 +244,130 @@ test("Release A keeps persona, pairing and remote command paths closed", { concu
   const vitals = await api.main({ action: "UPLOAD_VITALS", data: boardData() });
   assert.equal(vitals.ok, false);
   assert.equal(vitals.code, "PERSONA_DATA_MIGRATION_IN_PROGRESS");
+});
+
+test("caregiver reads keep existing plans, inquiries, vitals and records visible", { concurrency: false }, async () => {
+  const membership = {
+    _id: "membership-1",
+    openid: "family-member",
+    deviceId: DEVICE_ID,
+    status: "ACTIVE",
+    role: "CAREGIVER",
+    permissions: [
+      "READ_PROFILE",
+      "READ_PLAN",
+      "READ_INQUIRY",
+      "READ_VITALS",
+      "READ_RECORD",
+      "CREATE_COMMAND",
+    ],
+    service_user_scopes: ["wang-nainai"],
+  };
+  const { api } = loadCloudApi({
+    device_memberships: [membership],
+    service_users: [{
+      _id: "service-user-1",
+      deviceId: DEVICE_ID,
+      id: "wang-nainai",
+      name: "王奶奶",
+    }],
+    today_plans: [{
+      _id: "plan-1",
+      deviceId: DEVICE_ID,
+      service_user_id: "wang-nainai",
+      medicine: "苯磺酸氨氯地平片",
+      time: "08:00",
+    }],
+    inquiries: [{
+      _id: "inquiry-1",
+      deviceId: DEVICE_ID,
+      inquiry_id: "inquiry-1",
+      service_user_id: "wang-nainai",
+      symptoms_summary: "头晕",
+      updatedAt: "2026-08-21 10:00:00",
+    }],
+    vitals: [{
+      _id: "vitals-1",
+      deviceId: DEVICE_ID,
+      service_user_id: "wang-nainai",
+      heartRate: 72,
+      createdAt: "2026-08-21 09:00:00",
+    }],
+    records: [{
+      _id: "record-1",
+      deviceId: DEVICE_ID,
+      service_user_id: "wang-nainai",
+      message: "王奶奶完成健康测量",
+      createdAt: "2026-08-21 09:00:00",
+    }],
+  });
+
+  const snapshot = await api.main({ action: "GET_SNAPSHOT", data: { deviceId: DEVICE_ID } });
+  assert.equal(snapshot.serviceUsers.length, 1);
+  assert.equal(snapshot.plans.length, 1);
+  assert.equal(snapshot.inquiries.length, 1);
+  assert.equal(snapshot.vitals.length, 1);
+
+  const records = await api.main({
+    action: "LIST_RECORDS",
+    data: { deviceId: DEVICE_ID, limit: 20 },
+  });
+  assert.equal(records.length, 1);
+  assert.equal(records[0].message, "王奶奶完成健康测量");
+});
+
+test("medicine reads bridge the existing cloud rows until Station finalizes a snapshot", { concurrency: false }, async () => {
+  const { api } = loadCloudApi({
+    device_memberships: [{
+      _id: "membership-1",
+      openid: "family-member",
+      deviceId: DEVICE_ID,
+      status: "ACTIVE",
+      role: "CAREGIVER",
+      permissions: ["READ_MEDICINE"],
+    }],
+    medicines: [{
+      _id: `${DEVICE_ID}-slot-3`,
+      deviceId: DEVICE_ID,
+      medicineId: "slot-03-diosmectite",
+      medicine_id: "slot-03-diosmectite",
+      name: "蒙脱石散",
+      storageBox: "ORAL",
+      storage_box: "ORAL",
+      inventoryState: "STOCKED",
+      updatedAt: "2026-08-20 23:50:34",
+    }, {
+      _id: `${DEVICE_ID}-slot-13`,
+      deviceId: DEVICE_ID,
+      medicineId: "slot-13-ibuprofen",
+      medicine_id: "slot-13-ibuprofen",
+      name: "布洛芬缓释胶囊",
+      storageBox: "ORAL",
+      storage_box: "ORAL",
+      inventoryState: "STOCKED",
+      updatedAt: "2026-08-20 23:50:34",
+    }],
+  });
+
+  const snapshot = await api.main({
+    action: "GET_MEDICINE_SNAPSHOT",
+    data: { deviceId: DEVICE_ID },
+  });
+  assert.equal(snapshot.snapshotComplete, true);
+  assert.equal(snapshot.versionState, "TRANSITIONAL_LEGACY");
+  assert.equal(snapshot.rowCount, 2);
+  assert.match(snapshot.digest, /^[a-f0-9]{64}$/);
+  assert.deepEqual(
+    snapshot.rows.map(row => [row.medicineId, row.storageBox]),
+    [["slot-03-ibuprofen", "DAILY"], ["slot-13-montmorillonite", "DAILY"]],
+  );
+  assert.equal(
+    snapshot.digest,
+    canonicalSnapshotDigest(
+      DEVICE_ID,
+      "medicines",
+      snapshot.rows,
+      row => row.medicineId,
+    ),
+  );
 });

@@ -37,6 +37,9 @@ function loadInquiryPage(api, wx = {}, app = { globalData: { deviceId: "station-
       if (modulePath.includes("utils/carePage")) {
         return require(path.join(__dirname, "../miniprogram/utils/carePage"));
       }
+      if (modulePath.includes("utils/offlinePageCache")) {
+        return require(path.join(__dirname, "../miniprogram/utils/offlinePageCache"));
+      }
       if (modulePath.includes("utils/realtime")) return { subscribe: () => () => {} };
       if (modulePath.includes("utils/deviceSession")) {
         return {
@@ -75,6 +78,9 @@ function loadInquiryHistoryPage(api, app = { globalData: { deviceId: "station-de
       }
       if (modulePath.includes("utils/carePage")) {
         return require(path.join(__dirname, "../miniprogram/utils/carePage"));
+      }
+      if (modulePath.includes("utils/offlinePageCache")) {
+        return require(path.join(__dirname, "../miniprogram/utils/offlinePageCache"));
       }
       if (modulePath.includes("utils/realtime")) return { subscribe: () => () => {} };
       if (modulePath.includes("utils/deviceSession")) {
@@ -1070,7 +1076,7 @@ test("the inquiry page keeps its summaries and marks them stale when a backgroun
   assert.equal(page.data.stale, true);
   assert.equal(page.data.inquiryGroups[0].inquiries[0].id, "saved");
   assert.equal(page.data.carePage.phase.kind, "ready");
-  assert.match(page.data.carePage.focus.supporting, /可能不是最新/);
+  assert.match(page.data.carePage.focus.supporting, /已保存/);
 });
 
 test("the inquiry history uses the strict snapshot reader and does not present a failed read as empty", async () => {

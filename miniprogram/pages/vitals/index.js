@@ -4,12 +4,14 @@ const {
   composeCarePage,
   deviceAccessCarePage,
   loadingCarePage,
-  personaMigrationCarePage,
 } = require("../../utils/carePage");
 const deviceSession = require("../../utils/deviceSession");
 const { connectionCopy } = require("../../utils/connectionState");
 const vitalsAttribution = require("../../modules/vitalsAttribution");
 const { parseTimestamp } = require("../../utils/dateTime");
+const offlinePageCache = require("../../utils/offlinePageCache");
+
+const VITALS_CACHE_KEY = "vitals";
 
 const CARE_STATE_BY_MEASUREMENT = {
   danger: "risk",
@@ -17,6 +19,25 @@ const CARE_STATE_BY_MEASUREMENT = {
   good: "normal",
   muted: "muted",
 };
+
+function displayDeviceId(value) {
+  return String(value || "").trim() || "zykh-qsm-001";
+}
+
+function offlineBrowsingEnabled() {
+  if (typeof getApp !== "function") return false;
+  const app = getApp();
+  return Boolean(app && app.globalData && app.globalData.offlineBrowsingEnabled === true);
+}
+
+function fallbackDevice(deviceId, reason = "") {
+  return {
+    deviceId,
+    online: false,
+    connection: { state: "unavailable", online: false, reason: String(reason || "联网后自动更新") },
+    connectionState: "unavailable",
+  };
+}
 
 function displayValue(value) {
   return value === undefined || value === null || value === "" ? "--" : String(value);
@@ -194,7 +215,7 @@ function composeVitalsCarePage(
   }
 
   const focusSupporting = [
-    stale ? "刷新失败，当前结果可能不是最新" : "",
+    stale ? "当前显示已保存的测量结果，连接后自动更新" : "",
     vitalsView.timeLabel,
     vitals ? `测量对象：${vitalsView.personName}` : "",
     measurementTargetRequired
@@ -309,10 +330,7 @@ function vitalsErrorCarePage(device) {
     phase: {
       kind: "error",
       message: "测量数据读取失败，请检查网络后重新加载。",
-      action: {
-        id: "vitals.retry",
-        label: "重新加载测量数据",
-      },
+      action: { id: "vitals.retry", label: "重新加载测量数据" },
     },
   });
 }
@@ -424,7 +442,9 @@ Page({
 
   async load() {
     const app = getApp();
-    const requestDeviceId = String((app && app.globalData && app.globalData.deviceId) || "").trim();
+    const rawDeviceId = String(app && app.globalData && app.globalData.deviceId || "").trim();
+    const allowOfflineBrowsing = offlineBrowsingEnabled();
+    const requestDeviceId = allowOfflineBrowsing ? displayDeviceId(rawDeviceId) : rawDeviceId;
     const loadRequestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = loadRequestId;
     if (String(this.data.deviceId || "").trim() !== requestDeviceId) {
@@ -462,20 +482,44 @@ Page({
       });
       return;
     }
-    try {
-      const device = await api.getDeviceStrict(requestDeviceId);
-      let vitals;
-      try {
-        vitals = await api.getLatestVitalsStrict(requestDeviceId);
-      } catch (error) {
-        if (!deviceSession.isPersonaMigrationError(error)) throw error;
-        if (loadRequestId !== this._loadRequestId || !this.isDeviceScopeCurrent(requestDeviceId)) return;
-        this.setData({
-          device,
-          carePage: personaMigrationCarePage("健康测量", device.connection),
-        });
-        return;
+    if (allowOfflineBrowsing && this._cacheHydratedDeviceId !== requestDeviceId) {
+      this._cacheHydratedDeviceId = requestDeviceId;
+      const restored = offlinePageCache.restorePage(requestDeviceId, VITALS_CACHE_KEY);
+      if (restored) {
+        const cachedData = restored.data;
+        cachedData.commandStatusKnown = false;
+        cachedData.commandInFlight = false;
+        cachedData.carePage = offlinePageCache.markCarePageStale(composeVitalsCarePage(
+          cachedData.device,
+          cachedData.vitals,
+          cachedData.vitalsView,
+          false,
+          true,
+          false,
+          false,
+          cachedData.measurementTargets || [],
+          cachedData.selectedMeasurementTarget || null,
+          cachedData.measurementTargetRequired === true,
+        ), restored.updatedAtMs);
+        this._hasLoadedVitals = true;
+        this.setData(cachedData);
       }
+    }
+    try {
+      const [deviceRead, vitalsRead] = await Promise.all([
+        api.getDeviceStrict(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: fallbackDevice(requestDeviceId, error.message), error }),
+        ),
+        api.getLatestVitalsStrict(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: null, error }),
+        ),
+      ]);
+      const device = deviceRead.value;
+      const vitals = vitalsRead.value;
+      const primaryReadError = deviceRead.error || vitalsRead.error;
+      if (!allowOfflineBrowsing && primaryReadError) throw primaryReadError;
       const [commandRead, snapshotRead, capabilityRead] = await Promise.all([
         api.getRecentCommandsStrict(12, requestDeviceId).then(
           commands => ({ commands, known: true }),
@@ -492,6 +536,20 @@ Page({
       ]);
       if (loadRequestId !== this._loadRequestId || !this.isDeviceScopeCurrent(requestDeviceId)) return;
       if (commandRead.error) console.warn("vitals command status read failed", commandRead.error);
+      const sourceStale = Boolean(
+        deviceRead.error
+          || vitalsRead.error
+          || commandRead.error
+          || snapshotRead.error
+          || capabilityRead.error,
+      );
+      if (sourceStale && this.data.offlineSnapshot === true && this._hasLoadedVitals) {
+        this.setData({
+          stale: true,
+          carePage: offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs),
+        });
+        return;
+      }
       const measureCommands = commandRead.commands
         .filter(item => item.type === "READ_VITALS_ALL")
         .map(item => {
@@ -523,6 +581,7 @@ Page({
         })
         : null;
       const measuredAt = vitalTimestamp(vitals || {});
+      const stale = sourceStale;
       const vitalsView = {
         heartRate: vitals && measurement.showValues ? displayValue(vitals.heartRate) : "--",
         spo2: vitals && measurement.showValues ? displayValue(vitals.spo2) : "--",
@@ -544,20 +603,21 @@ Page({
           ? "用于家庭记录；持续异常请咨询专业医生。"
           : "药箱上线后执行；持续异常请咨询专业医生。",
       };
-      this.setData({
+      const lastSyncedAtMs = Date.now();
+      const nextData = {
         deviceId: requestDeviceId,
         device,
         vitals,
         vitalsAttribution: attribution,
         capabilitySnapshot: capabilityRead.capabilitySnapshot,
         vitalsView,
-        stale: false,
+        stale,
         carePage: composeVitalsCarePage(
           device,
           vitals,
           vitalsView,
           this.data.measuring,
-          false,
+          stale,
           commandRead.known,
           commandInFlight,
           targetContext.targets,
@@ -571,6 +631,9 @@ Page({
         measurementTargets: targetContext.targets,
         selectedMeasurementTarget: targetContext.selected,
         measurementTargetRequired: targetContext.required,
+        offlineSnapshot: false,
+        lastSyncedAtMs,
+        lastSyncedAtText: offlinePageCache.formatUpdatedAt(lastSyncedAtMs),
         detailRows: this.data.detailVisible
           ? measurementDetailRows(
             device,
@@ -580,29 +643,81 @@ Page({
             capabilityRead.capabilitySnapshot,
           )
           : this.data.detailRows,
-      });
+      };
+      this.setData(nextData);
       this._hasLoadedVitals = true;
+      const successfulReadCount = [
+        deviceRead.error,
+        vitalsRead.error,
+        commandRead.error,
+        snapshotRead.error,
+        capabilityRead.error,
+      ].filter(error => !error).length;
+      if (successfulReadCount > 0) {
+        offlinePageCache.savePage(
+          requestDeviceId,
+          VITALS_CACHE_KEY,
+          Object.assign({}, this.data, nextData),
+          { updatedAtMs: lastSyncedAtMs, quality: stale ? "partial" : "complete" },
+        );
+      }
     } catch (error) {
       if (loadRequestId !== this._loadRequestId || !this.isDeviceScopeCurrent(requestDeviceId)) return;
       console.warn("vitals read failed", error);
       if (this._hasLoadedVitals && String(this.data.deviceId || "").trim() === requestDeviceId) {
         this.setData({
           stale: true,
-          carePage: composeVitalsCarePage(
-            this.data.device,
-            this.data.vitals,
-            this.data.vitalsView,
-            this.data.measuring,
-            true,
-            this.data.commandStatusKnown,
-            this.data.commandInFlight,
-            this.data.measurementTargets,
-            this.data.selectedMeasurementTarget,
-            this.data.measurementTargetRequired,
-          ),
+          carePage: this.data.offlineSnapshot
+            ? offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs)
+            : composeVitalsCarePage(
+              this.data.device,
+              this.data.vitals,
+              this.data.vitalsView,
+              this.data.measuring,
+              true,
+              this.data.commandStatusKnown,
+              this.data.commandInFlight,
+              this.data.measurementTargets,
+              this.data.selectedMeasurementTarget,
+              this.data.measurementTargetRequired,
+            ),
         });
       } else {
-        this.setData({ carePage: vitalsErrorCarePage(this.data.device) });
+        if (!allowOfflineBrowsing) {
+          this.setData({ carePage: vitalsErrorCarePage(this.data.device) });
+          return;
+        }
+        const device = fallbackDevice(requestDeviceId, error.message);
+        const vitalsView = emptyVitalsView();
+        this._hasLoadedVitals = true;
+        this.setData({
+          deviceId: requestDeviceId,
+          device,
+          vitals: null,
+          vitalsAttribution: null,
+          capabilitySnapshot: {},
+          vitalsView,
+          latestCommand: {},
+          commands: [],
+          commandStatusKnown: false,
+          commandInFlight: false,
+          measurementTargets: [],
+          selectedMeasurementTarget: null,
+          measurementTargetRequired: false,
+          stale: true,
+          carePage: composeVitalsCarePage(
+            device,
+            null,
+            vitalsView,
+            this.data.measuring,
+            true,
+            false,
+            false,
+            [],
+            null,
+            false,
+          ),
+        });
       }
     }
   },
@@ -625,6 +740,10 @@ Page({
 
   async readAll() {
     if (this.data.measuring) return;
+    if (this.data.offlineSnapshot || !(this.data.device && this.data.device.online)) {
+      wx.showToast({ title: "药箱在线后可请求测量", icon: "none" });
+      return;
+    }
     const requestDeviceId = String(this.data.deviceId || "").trim();
     if (!this.isDeviceScopeCurrent(requestDeviceId)) {
       wx.showToast({ title: "药箱已切换，请重新打开测量", icon: "none" });

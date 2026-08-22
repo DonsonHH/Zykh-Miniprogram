@@ -272,7 +272,8 @@ test("the shared header keeps family-facing wording, brand and readable supporti
 
   assert.match(logic, /compact:\s*\{[\s\S]*?value:\s*true/);
   assert.match(layout, /药箱在线/);
-  assert.match(layout, /等待药箱连接/);
+  assert.match(layout, /等待同步/);
+  assert.match(layout, /当前内容仍可浏览/);
   assert.doesNotMatch(layout, /站点在线/);
   assert.match(layout, /src="\/images\/brand-mark\.png"/);
   assert.match(layout, /<text[^>]*>智药康护<\/text>/);

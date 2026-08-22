@@ -4,6 +4,13 @@ const { composeCarePage, loadingCarePage } = require("../../../utils/carePage");
 const { createPersonaVisibilityPolicy } = require("../../../modules/personaVisibility");
 const { runAfterDeviceSessionReady } = require("../../../utils/deviceSession");
 const { parseTimestamp } = require("../../../utils/dateTime");
+const offlinePageCache = require("../../../utils/offlinePageCache");
+
+function historyCacheKey(personScope = {}) {
+  const personId = String(personScope.personId || "all").replace(/[^A-Za-z0-9_.-]/g, "-");
+  const generation = String(personScope.personaGeneration || "current").replace(/[^A-Za-z0-9_.-]/g, "-");
+  return `inquiry-history-${personId}-${generation}`;
+}
 
 function inquiryHistoryErrorCarePage(message) {
   return composeCarePage({
@@ -16,6 +23,12 @@ function inquiryHistoryErrorCarePage(message) {
       action: { id: "inquiry.history.retry", label: "重新读取问询历史" },
     },
   });
+}
+
+function offlineBrowsingEnabled() {
+  if (typeof getApp !== "function") return false;
+  const app = getApp();
+  return Boolean(app && app.globalData && app.globalData.offlineBrowsingEnabled === true);
 }
 
 function inquiryTimeLabel(value) {
@@ -191,6 +204,13 @@ Page({
     }
     const loadRequestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = loadRequestId;
+    const cacheKey = historyCacheKey(this.data.personScope || {});
+    const cacheScope = `${requestDeviceId}:${cacheKey}`;
+    if (offlineBrowsingEnabled() && this._cacheHydratedScope !== cacheScope) {
+      this._cacheHydratedScope = cacheScope;
+      const restored = offlinePageCache.restorePage(requestDeviceId, cacheKey);
+      if (restored) this.setData(restored.data);
+    }
     const initialLoad = this.data.hasLoaded !== true;
     if (initialLoad) {
       this.setData({
@@ -216,23 +236,47 @@ Page({
         ? inquiries.filter(item => api.inquiryMatchesPersonScope(item, personScope))
         : inquiries;
 
-      this.setData({
+      const lastSyncedAtMs = Date.now();
+      const nextData = {
         inquiryGroups: decorateInquiryGroups(scopedInquiries),
         initialLoading: false,
         hasLoaded: true,
         loadError: "",
         stale: false,
-      });
+        offlineSnapshot: false,
+        lastSyncedAtMs,
+        lastSyncedAtText: offlinePageCache.formatUpdatedAt(lastSyncedAtMs),
+      };
+      this.setData(nextData);
+      offlinePageCache.savePage(
+        requestDeviceId,
+        cacheKey,
+        Object.assign({}, this.data, nextData),
+        { updatedAtMs: lastSyncedAtMs },
+      );
     } catch (error) {
       if (loadRequestId !== this._loadRequestId
         || String(this.data.deviceId || "").trim() !== requestDeviceId
         || activeDeviceId() !== requestDeviceId) return;
-      const loadError = initialLoad ? "问询历史暂未同步，请稍后刷新。" : "";
+      if (initialLoad && !offlineBrowsingEnabled()) {
+        const loadError = "问询历史暂未同步，请稍后刷新。";
+        this.setData({
+          initialLoading: false,
+          loadError,
+          stale: false,
+          carePage: inquiryHistoryErrorCarePage(loadError),
+        });
+        return;
+      }
       this.setData({
         initialLoading: false,
-        loadError,
-        stale: !initialLoad,
-        carePage: initialLoad ? inquiryHistoryErrorCarePage(loadError) : this.data.carePage,
+        inquiryGroups: initialLoad ? [] : this.data.inquiryGroups,
+        hasLoaded: true,
+        loadError: "",
+        stale: true,
+        historyBoundaryText: this.data.offlineSnapshot
+          ? `当前显示上次同步记录 · ${this.data.lastSyncedAtText || "时间未知"}`
+          : this.data.historyBoundaryText,
       });
     }
   },

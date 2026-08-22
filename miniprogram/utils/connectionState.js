@@ -102,7 +102,7 @@ function projectConnection(device = {}, options = {}) {
   if (age < ONLINE_THRESHOLD_MS) {
     return projection({ state: "online", lastSeenAt, lastSeenAtEpochMs, heartbeatAgeMs: age, reason: "药箱已同步" });
   }
-  return projection({ state: "stale", lastSeenAt, lastSeenAtEpochMs, heartbeatAgeMs: age, reason: "等待药箱连接" });
+  return projection({ state: "stale", lastSeenAt, lastSeenAtEpochMs, heartbeatAgeMs: age, reason: "等待同步" });
 }
 
 function connectionCopy(connection = {}) {
@@ -110,10 +110,10 @@ function connectionCopy(connection = {}) {
   const copy = {
     loading: { title: "正在确认药箱状态", hint: "请稍候", kind: "loading" },
     online: { title: "药箱在线", hint: "同步正常", kind: "online" },
-    stale: { title: "等待药箱连接", hint: "可查看上次同步内容", kind: "stale" },
-    unavailable: { title: "药箱状态暂不可用", hint: "请稍后重试", kind: "unavailable" },
-    unpaired: { title: "请先配对药箱", hint: "完成授权后查看", kind: "unpaired" },
-    incompatible: { title: "云端版本待升级", hint: "上次内容仍可查看", kind: "incompatible" },
+    stale: { title: "等待同步", hint: "可查看当前内容", kind: "stale" },
+    unavailable: { title: "等待同步", hint: "当前内容仍可浏览", kind: "unavailable" },
+    unpaired: { title: "尚未连接药箱", hint: "当前内容仍可浏览", kind: "unpaired" },
+    incompatible: { title: "等待同步", hint: "当前内容仍可浏览", kind: "incompatible" },
   }[state];
   return Object.assign({}, copy, { reason: text(connection.reason) });
 }

@@ -15,7 +15,7 @@
       <view class="ui-loading__spinner"></view>
       <view class="ui-loading__text">正在整理{{scopeName ? scopeName + '的' : '全部'}}已完成问询摘要…</view>
     </view>
-    <view wx:elif="{{!inquiryGroups.length}}" class="ui-surface ui-empty inquiry-empty">{{scopeName ? '全设备最近 60 条同步窗口内暂无这位家人的已完成问询。' : '全设备最近 60 条同步窗口内暂无已完成问询。'}}</view>
+    <view wx:elif="{{!inquiryGroups.length}}" class="ui-surface ui-empty inquiry-empty">{{stale ? '问询历史等待同步，联网后会自动更新。' : (scopeName ? '全设备最近 60 条同步窗口内暂无这位家人的已完成问询。' : '全设备最近 60 条同步窗口内暂无已完成问询。')}}</view>
     <block wx:else>
       <view wx:if="{{historyBoundaryText}}" class="ui-surface inquiry-history-boundary">{{historyBoundaryText}}</view>
       <view wx:for="{{inquiryGroups}}" wx:for-item="group" wx:for-index="groupIndex" wx:key="personKey" class="inquiry-group">

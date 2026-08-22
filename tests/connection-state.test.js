@@ -43,10 +43,11 @@ test("connection states preserve loading, stale, unavailable, unpaired and incom
   assert.equal(projectConnection({}, { compatible: false }).state, "incompatible");
 });
 
-test("only stale uses the waiting-for-connection copy", () => {
-  const states = ["loading", "online", "stale", "unavailable", "unpaired", "incompatible"];
-  states.forEach(state => {
-    const title = connectionCopy({ state }).title;
-    assert.equal(title === "等待药箱连接", state === "stale", state);
-  });
+test("non-blocking connection states keep browsing copy explicit", () => {
+  assert.equal(connectionCopy({ state: "loading" }).title, "正在确认药箱状态");
+  assert.equal(connectionCopy({ state: "online" }).title, "药箱在线");
+  assert.equal(connectionCopy({ state: "stale" }).title, "等待同步");
+  assert.equal(connectionCopy({ state: "unavailable" }).title, "等待同步");
+  assert.equal(connectionCopy({ state: "incompatible" }).title, "等待同步");
+  assert.equal(connectionCopy({ state: "unpaired" }).title, "尚未连接药箱");
 });

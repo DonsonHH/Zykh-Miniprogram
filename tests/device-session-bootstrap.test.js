@@ -42,7 +42,7 @@ function loadApp({ module, savedDeviceId = "cached-box" } = {}) {
   return { app: definition, storage, cloudInit };
 }
 
-test("cold start exposes no device until account access resolves", async () => {
+test("cold start exposes the saved display scope while account access resolves", async () => {
   const pending = deferred();
   const resolveCalls = [];
   const { app, storage, cloudInit } = loadApp({
@@ -54,7 +54,9 @@ test("cold start exposes no device until account access resolves", async () => {
     },
   });
   app.onLaunch();
-  assert.equal(app.globalData.deviceId, "");
+  assert.equal(app.globalData.deviceId, "cached-box");
+  assert.equal(app.globalData.offlineBrowsingEnabled, true);
+  assert.equal(app.globalData.deviceSession.displayOnly, true);
   assert.equal(app.globalData.deviceSession.connection.state, "loading");
   assert.equal(app.globalData.deviceSessionResolved, false);
   assert.equal(cloudInit.length, 1);
@@ -76,7 +78,7 @@ test("cold start exposes no device until account access resolves", async () => {
   assert.equal(storage.get("deviceId"), "authorized-box");
 });
 
-test("incompatible cloud clears cached scope and remains explicit", async () => {
+test("incompatible cloud retains the display scope while remaining explicit", async () => {
   const { app, storage } = loadApp({
     module: {
       async resolve() {
@@ -93,12 +95,13 @@ test("incompatible cloud clears cached scope and remains explicit", async () => 
   });
   app.onLaunch();
   await app.waitForDeviceSession();
-  assert.equal(app.globalData.deviceId, "");
+  assert.equal(app.globalData.deviceId, "cached-box");
+  assert.equal(app.globalData.deviceSession.displayOnly, true);
   assert.equal(app.globalData.deviceSession.connection.state, "incompatible");
-  assert.equal(storage.has("deviceId"), false);
+  assert.equal(storage.get("deviceId"), "cached-box");
 });
 
-test("unpaired and other non-ready membership states cannot retain stale selection", async () => {
+test("non-ready membership states retain only the saved display scope", async () => {
   for (const availability of ["unpaired", "error", "forbidden", "pairing-unavailable"]) {
     const { app, storage } = loadApp({
       module: {
@@ -115,8 +118,9 @@ test("unpaired and other non-ready membership states cannot retain stale selecti
     });
     app.onLaunch();
     await app.waitForDeviceSession();
-    assert.equal(app.globalData.deviceId, "", availability);
-    assert.equal(storage.has("deviceId"), false, availability);
+    assert.equal(app.globalData.deviceId, "cached-box", availability);
+    assert.equal(app.globalData.deviceSession.displayOnly, true, availability);
+    assert.equal(storage.get("deviceId"), "cached-box", availability);
   }
 });
 

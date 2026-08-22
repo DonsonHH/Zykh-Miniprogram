@@ -3,10 +3,12 @@ const realtime = require("../../utils/realtime");
 const deviceSession = require("../../utils/deviceSession");
 const {
   composeCarePage,
-  deviceAccessCarePage,
   loadingCarePage,
 } = require("../../utils/carePage");
-const { summarizeMedicineLibrary } = require("../../utils/medicineLibrary");
+const { mergeFixedMedicineBaseline, summarizeMedicineLibrary } = require("../../utils/medicineLibrary");
+const offlinePageCache = require("../../utils/offlinePageCache");
+
+const LIBRARY_CACHE_KEY = "library";
 
 function medicinesForDisplay(medicines = []) {
   return Array.isArray(medicines) ? medicines : [];
@@ -15,6 +17,15 @@ function medicinesForDisplay(medicines = []) {
 function activeDeviceId() {
   const app = getApp();
   return String((app && app.globalData && app.globalData.deviceId) || "").trim();
+}
+
+function fallbackDevice(deviceId, reason = "") {
+  return {
+    deviceId,
+    online: false,
+    connection: { state: "unavailable", online: false, reason: String(reason || "联网后自动更新") },
+    connectionState: "unavailable",
+  };
 }
 
 function clearedLibraryScope(deviceId = "") {
@@ -61,20 +72,20 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
     }
     : summary.medicineCount
       ? {
-      eyebrow: stale ? "数据待刷新" : "家庭药库",
+      eyebrow: stale ? "已保存药品" : "家庭药库",
       title: "三类药品已整理",
       supporting: catalogOnly
           ? `共 ${summary.medicineCount || 0} 种药品，等待终端同步库存和有效期。`
           : `共 ${summary.medicineCount || 0} 种药品，库存和有效期已同步。`,
-        state: { kind: stale ? "pending" : (catalogOnly ? "muted" : "normal"), label: stale ? "待刷新" : (catalogOnly ? "待同步" : "已同步") },
+        state: { kind: stale ? "muted" : (catalogOnly ? "muted" : "normal"), label: stale ? "可浏览" : (catalogOnly ? "待同步" : "已同步") },
         action: { id: "library.all.focus", label: "查看全部药品" },
         activation: "surface",
       }
       : {
-        eyebrow: stale ? "数据待刷新" : "家庭药库",
+        eyebrow: stale ? "已保存药品" : "家庭药库",
         title: "暂无已入库药品",
-        supporting: "药品资料等待终端同步。",
-        state: { kind: "muted", label: "等待同步" },
+        supporting: "仍可查看三个药柜；连接后会自动补充药品资料。",
+        state: { kind: "muted", label: "可浏览" },
         action: null,
         activation: "none",
       };
@@ -140,20 +151,6 @@ function composeLibraryCarePage(device = {}, summary = {}, options = {}) {
   });
 }
 
-function libraryErrorCarePage(device = {}) {
-  return composeCarePage({
-    key: "medicine-library-error",
-    title: "家庭药库",
-    online: device.online === true,
-    connection: device.connection,
-    phase: {
-      kind: "error",
-      message: "药品资料读取失败，当前无法确认家庭药库状态。",
-      action: { id: "library.retry", label: "重新读取药品资料" },
-    },
-  });
-}
-
 Page({
   data: clearedLibraryScope(""),
 
@@ -184,50 +181,92 @@ Page({
   },
 
   async load() {
-    const requestDeviceId = activeDeviceId();
+    const requestDeviceId = activeDeviceId() || "zykh-qsm-001";
     if (requestDeviceId !== String(this.data.deviceId || "").trim()) {
       this._hasLoadedSnapshot = false;
       this.setData(clearedLibraryScope(requestDeviceId));
     }
     const requestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = requestId;
-    if (!requestDeviceId) {
-      this.stopRealtime();
-      this._hasLoadedSnapshot = false;
-      this.setData({
-        carePage: deviceAccessCarePage(
-          "家庭药库",
-          deviceSession.currentDeviceSession(),
-          { retryAction: { id: "library.retry", label: "重新确认药箱状态" } },
-        ),
-      });
-      return;
+    if (this._cacheHydratedDeviceId !== requestDeviceId) {
+      this._cacheHydratedDeviceId = requestDeviceId;
+      const restored = offlinePageCache.restorePage(requestDeviceId, LIBRARY_CACHE_KEY);
+      if (restored) {
+        this._hasLoadedSnapshot = true;
+        this.setData(restored.data);
+      }
     }
     try {
-      const [device, medicines] = await Promise.all([
-        api.getDeviceStrict(requestDeviceId),
-        api.getMedicinesStrict(requestDeviceId),
+      const [deviceRead, medicineRead] = await Promise.all([
+        api.getDeviceStrict(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({
+            value: this.data.device && this.data.device.deviceId === requestDeviceId
+              ? this.data.device
+              : fallbackDevice(requestDeviceId, error.message),
+            error,
+          }),
+        ),
+        api.getMedicinesStrict(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: [], error }),
+        ),
       ]);
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
-      const summary = summarizeMedicineLibrary(medicinesForDisplay(medicines));
-      this._hasLoadedSnapshot = true;
-      this.setData({
+      const cloudMedicines = medicinesForDisplay(medicineRead.value);
+      const medicines = cloudMedicines.length ? cloudMedicines : mergeFixedMedicineBaseline([]);
+      const device = deviceRead.value;
+      const stale = Boolean(deviceRead.error || medicineRead.error);
+      if (stale && this.data.offlineSnapshot === true && this._hasLoadedSnapshot) {
+        this.setData({
+          stale: true,
+          carePage: offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs),
+        });
+        return;
+      }
+      const catalogOnly = !cloudMedicines.length;
+      const summary = summarizeMedicineLibrary(medicines);
+      const lastSyncedAtMs = Date.now();
+      const nextData = {
         deviceId: requestDeviceId,
         device,
         summary,
         hasLoadedSnapshot: true,
-        stale: false,
-        carePage: composeLibraryCarePage(device, summary),
-      });
+        stale,
+        offlineSnapshot: false,
+        lastSyncedAtMs,
+        lastSyncedAtText: offlinePageCache.formatUpdatedAt(lastSyncedAtMs),
+        carePage: composeLibraryCarePage(device, summary, { stale, catalogOnly }),
+      };
+      this._hasLoadedSnapshot = true;
+      this.setData(nextData);
+      if (!deviceRead.error || !medicineRead.error) {
+        offlinePageCache.savePage(requestDeviceId, LIBRARY_CACHE_KEY, nextData, {
+          updatedAtMs: lastSyncedAtMs,
+          quality: stale ? "partial" : "complete",
+        });
+      }
     } catch (error) {
       if (requestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
       console.warn("medicine library loading failed", error);
       if (!this._hasLoadedSnapshot) {
-        this.setData({ carePage: libraryErrorCarePage(this.data.device) });
+        const device = fallbackDevice(requestDeviceId, error.message);
+        const summary = summarizeMedicineLibrary(mergeFixedMedicineBaseline([]));
+        this._hasLoadedSnapshot = true;
+        this.setData({
+          deviceId: requestDeviceId,
+          device,
+          summary,
+          hasLoadedSnapshot: true,
+          stale: true,
+          carePage: composeLibraryCarePage(device, summary, { stale: true, catalogOnly: true }),
+        });
       } else {
         this.setData({
           stale: true,
-          carePage: composeLibraryCarePage(this.data.device, this.data.summary, { stale: true }),
+          carePage: this.data.offlineSnapshot
+            ? offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs)
+            : composeLibraryCarePage(this.data.device, this.data.summary, { stale: true }),
         });
       }
     }

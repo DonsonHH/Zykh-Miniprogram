@@ -340,7 +340,8 @@ test("three-box library ships a compact overview and a dedicated full list", () 
   assert.match(overviewLogic, /key:\s*"library-attention-total",\s*label:\s*"待处理"/);
   assert.match(overviewLogic, /getMedicinesStrict/);
   assert.match(listLogic, /getMedicinesStrict/);
-  assert.doesNotMatch(`${overviewLogic}\n${listLogic}`, /includeFixedBaseline|mergeFixedMedicineBaseline/);
+  assert.match(overviewLogic, /mergeFixedMedicineBaseline/);
+  assert.match(listLogic, /mergeFixedMedicineBaseline/);
   assert.doesNotMatch(`${overview}\n${overviewLogic}`, /OPEN_CABINET|DISPENSE|23\s*仓/);
   const retiredStoragePattern = new RegExp(`\\u51b7\\u85cf|\\b${"CO" + "LD"}\\b`);
   assert.doesNotMatch(`${overview}\n${overviewLogic}\n${list}\n${listLogic}`, retiredStoragePattern);

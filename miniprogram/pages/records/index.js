@@ -7,9 +7,30 @@ const vitalsAttribution = require("../../modules/vitalsAttribution");
 const personaVisibility = require("../../modules/personaVisibility");
 const { mergeCapabilitySnapshots } = require("../../modules/capabilitySnapshot");
 const { parseTimestamp } = require("../../utils/dateTime");
+const offlinePageCache = require("../../utils/offlinePageCache");
 
 const RECORD_PREVIEW_LIMIT = 4;
 const medicationSafetyEventModule = medicationSafetyEvents.createMedicationSafetyEventModule(api);
+const RECORDS_CACHE_KEY = "care-records";
+
+function displayDeviceId(value) {
+  return String(value || "").trim() || "zykh-qsm-001";
+}
+
+function offlineBrowsingEnabled() {
+  if (typeof getApp !== "function") return false;
+  const app = getApp();
+  return Boolean(app && app.globalData && app.globalData.offlineBrowsingEnabled === true);
+}
+
+function fallbackDevice(deviceId, reason = "") {
+  return {
+    deviceId,
+    online: false,
+    connection: { state: "unavailable", online: false, reason: String(reason || "联网后自动更新") },
+    connectionState: "unavailable",
+  };
+}
 
 function firstPresent(...values) {
   for (let i = 0; i < values.length; i += 1) {
@@ -235,7 +256,9 @@ function buildRecordsCarePage(state = {}) {
     focus: {
       eyebrow: "最近一次照护",
       title: focusTitle,
-      supporting: state.stale ? "刷新失败，当前记录可能不是最新。" : "",
+      supporting: state.stale
+        ? `当前显示已保存记录 · ${state.lastSyncedAtText || "连接后自动更新"}`
+        : "",
       state: careStateForRecord(focusRecord),
       action: focusRecord ? {
         id: "records-action-open-latest",
@@ -368,10 +391,7 @@ function recordsErrorCarePage(device) {
     phase: {
       kind: "error",
       message: "照护记录读取失败，请检查网络后重新加载。",
-      action: {
-        id: "records.retry",
-        label: "重新加载照护记录",
-      },
+      action: { id: "records.retry", label: "重新加载照护记录" },
     },
   });
 }
@@ -500,23 +520,68 @@ Page({
 
   async load() {
     const app = getApp();
-    const requestDeviceId = String((app && app.globalData && app.globalData.deviceId) || "").trim();
+    const rawDeviceId = String(app && app.globalData && app.globalData.deviceId || "").trim();
+    const allowOfflineBrowsing = offlineBrowsingEnabled();
+    const requestDeviceId = allowOfflineBrowsing ? displayDeviceId(rawDeviceId) : rawDeviceId;
     this.prepareDeviceScope(requestDeviceId);
     const loadGeneration = Number(this._loadGeneration || 0) + 1;
     this._loadGeneration = loadGeneration;
+    if (allowOfflineBrowsing && this._cacheHydratedDeviceId !== requestDeviceId) {
+      this._cacheHydratedDeviceId = requestDeviceId;
+      const restored = offlinePageCache.restorePage(requestDeviceId, RECORDS_CACHE_KEY);
+      if (restored) {
+        this._hasLoadedRecords = true;
+        this.setData(restored.data);
+      }
+    }
     try {
-      const [device, vitals, safetyState, snapshotRead] = await Promise.all([
-        api.getDevice(requestDeviceId),
-        api.getRecentVitalsStrict(80, requestDeviceId),
+      const [deviceRead, vitalsRead, safetyRead, snapshotRead] = await Promise.all([
+        api.getDevice(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: fallbackDevice(requestDeviceId, error.message), error }),
+        ),
+        api.getRecentVitalsStrict(80, requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({ value: [], error }),
+        ),
         medicationSafetyEventModule.list({
           limit: 50,
           deviceId: requestDeviceId,
           includeLocalFixtures: true,
-        }),
-        api.getSnapshotStrict({ inquiryLimit: 1, deviceId: requestDeviceId }),
+          allowUnavailableLocalFallback: allowOfflineBrowsing,
+        }).then(
+          value => ({ value, error: null }),
+          error => ({
+            value: medicationSafetyEvents.mergeLocalMedicationSafetyFixtures(
+              { availability: "error", events: [], message: "联网后自动更新风险记录" },
+              requestDeviceId,
+              { includeLocalFixtures: true, allowUnavailableLocalFallback: allowOfflineBrowsing },
+            ),
+            error,
+          }),
+        ),
+        api.getSnapshotStrict({ inquiryLimit: 1, deviceId: requestDeviceId }).then(
+          value => ({ value, error: null }),
+          error => ({ value: { serviceUsers: [], capabilities: {} }, error }),
+        ),
       ]);
       if (loadGeneration !== this._loadGeneration || !this.isDeviceScopeCurrent(requestDeviceId)) return;
-      const snapshot = snapshotRead || {};
+      const device = deviceRead.value;
+      const vitals = vitalsRead.value;
+      const safetyState = safetyRead.value;
+      const snapshot = snapshotRead.value || {};
+      const sourceStale = [deviceRead.error, vitalsRead.error, safetyRead.error, snapshotRead.error]
+        .some(Boolean);
+      const strictReadError = [deviceRead.error, vitalsRead.error, safetyRead.error, snapshotRead.error]
+        .find(Boolean);
+      if (!allowOfflineBrowsing && strictReadError) throw strictReadError;
+      if (sourceStale && this.data.offlineSnapshot === true && this._hasLoadedRecords) {
+        this.setData({
+          stale: true,
+          carePage: offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs),
+        });
+        return;
+      }
       const deviceSessionState = app && app.globalData && app.globalData.deviceSession || {};
       const capabilitySnapshot = mergeCapabilitySnapshots(
         deviceSessionState,
@@ -558,6 +623,7 @@ Page({
         ? "loading"
         : (safetyNextCursor ? "idle" : "done");
       const feed = buildFeed(vitalsRecords, safetyRecords);
+      const lastSyncedAtMs = Date.now();
       this.applyRecordFilter(this.data.recordFilter, feed, {
         device,
         vitalsRecords,
@@ -569,7 +635,13 @@ Page({
         safetyPaginationStatus,
         safetyPaginationError: "",
         feed,
-        stale: transientSafetyFailure,
+        stale: sourceStale || transientSafetyFailure,
+        offlineSnapshot: false,
+        lastSyncedAtMs,
+        lastSyncedAtText: offlinePageCache.formatUpdatedAt(lastSyncedAtMs),
+        persistOfflineSnapshot: [deviceRead.error, vitalsRead.error, safetyRead.error, snapshotRead.error]
+          .some(error => !error),
+        offlineSnapshotQuality: sourceStale || transientSafetyFailure ? "partial" : "complete",
         todaySafetyCount: todayCount(
           safetyRecords.filter(item => item.checkStatus === "BLOCKED"),
           "safety",
@@ -585,10 +657,42 @@ Page({
         const stale = true;
         this.setData({
           stale,
-          carePage: buildRecordsCarePage(Object.assign({}, this.data, { stale })),
+          carePage: this.data.offlineSnapshot
+            ? offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs)
+            : buildRecordsCarePage(Object.assign({}, this.data, { stale })),
         });
       } else {
-        this.setData({ carePage: recordsErrorCarePage(this.data.device) });
+        if (!allowOfflineBrowsing) {
+          this.setData({ carePage: recordsErrorCarePage(this.data.device) });
+          return;
+        }
+        const device = fallbackDevice(requestDeviceId, error.message);
+        const safetyState = medicationSafetyEvents.mergeLocalMedicationSafetyFixtures(
+          { availability: "error", events: [], message: "联网后自动更新风险记录" },
+          requestDeviceId,
+          { includeLocalFixtures: true, allowUnavailableLocalFallback: true },
+        );
+        const safetyRecords = buildSafetyRecords(safetyState.events || [], null);
+        const feed = buildFeed([], safetyRecords);
+        this._hasLoadedRecords = true;
+        this.applyRecordFilter(this.data.recordFilter, feed, {
+          device,
+          vitalsRecords: [],
+          safetyRecords,
+          safetyState,
+          safetyDeviceId: requestDeviceId,
+          safetyLoadedPageCount: 1,
+          safetyNextCursor: "",
+          safetyPaginationStatus: "done",
+          safetyPaginationError: "",
+          feed,
+          stale: true,
+          todaySafetyCount: todayCount(
+            safetyRecords.filter(item => item.checkStatus === "BLOCKED"),
+            "safety",
+          ),
+          todayVitalsCount: 0,
+        });
       }
     }
   },
@@ -601,6 +705,8 @@ Page({
   },
 
   applyRecordFilter(filter, source, patch = {}) {
+    const persistOfflineSnapshot = patch.persistOfflineSnapshot === true;
+    const offlineSnapshotQuality = patch.offlineSnapshotQuality === "partial" ? "partial" : "complete";
     const nextFilter = ["all", "safety", "vitals"].includes(filter) ? filter : "all";
     const feed = Array.isArray(source) ? source : (patch.feed || this.data.feed || []);
     const visibleFeed = nextFilter === "all" ? feed : feed.filter(item => item.type === nextFilter);
@@ -611,12 +717,23 @@ Page({
       previewFeed: visibleFeed.slice(0, RECORD_PREVIEW_LIMIT),
       emptyText: emptyTextFor(nextFilter, patch.safetyState || this.data.safetyState),
     });
+    delete nextData.persistOfflineSnapshot;
+    delete nextData.offlineSnapshotQuality;
     if (this.data.detailVisible && this.data.detailMode === "list") {
       nextData.detailList = visibleFeed;
     }
     Object.assign(nextData, safetyPaginationView(Object.assign({}, this.data, nextData)));
     nextData.carePage = buildRecordsCarePage(Object.assign({}, this.data, nextData));
     this.setData(nextData);
+    if (persistOfflineSnapshot) {
+      const deviceId = String(nextData.safetyDeviceId || this.data.safetyDeviceId || "").trim();
+      offlinePageCache.savePage(
+        deviceId,
+        RECORDS_CACHE_KEY,
+        Object.assign({}, this.data, nextData),
+        { updatedAtMs: nextData.lastSyncedAtMs, quality: offlineSnapshotQuality },
+      );
+    }
   },
 
   setRecordFilter(e) {

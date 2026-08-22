@@ -17,12 +17,42 @@ const personaVisibility = require("../../modules/personaVisibility");
 const vitalsAttribution = require("../../modules/vitalsAttribution");
 const { mergeCapabilitySnapshots } = require("../../modules/capabilitySnapshot");
 const { parseDate, parseTimestamp } = require("../../utils/dateTime");
+const offlinePageCache = require("../../utils/offlinePageCache");
 
 const medicationSafetyEventModule = medicationSafetyEvents.createMedicationSafetyEventModule(api);
+const HOME_CACHE_KEY = "home";
 
 function activeDeviceId() {
   const app = getApp();
   return String((app && app.globalData && app.globalData.deviceId) || "").trim();
+}
+
+function displayDeviceId(value) {
+  return String(value || "").trim() || "zykh-qsm-001";
+}
+
+function offlineBrowsingEnabled() {
+  if (typeof getApp !== "function") return false;
+  const app = getApp();
+  return Boolean(app && app.globalData && app.globalData.offlineBrowsingEnabled === true);
+}
+
+function fallbackDevice(deviceId, reason = "") {
+  return {
+    _id: deviceId,
+    deviceId,
+    name: "家庭药箱",
+    online: false,
+    connection: { state: "unavailable", online: false, reason: String(reason || "联网后自动更新") },
+    connectionState: "unavailable",
+    lastSeenAt: "",
+  };
+}
+
+function fallbackMedicines() {
+  return typeof medicineLibrary.mergeFixedMedicineBaseline === "function"
+    ? medicineLibrary.mergeFixedMedicineBaseline([])
+    : [];
 }
 
 function currentFactIdentity(value = {}) {
@@ -258,9 +288,9 @@ function todoPriority(item = {}) {
   return levelRank[item.level] === undefined ? 4 : levelRank[item.level];
 }
 
-function heroStateForTodo(todo, device = {}) {
+function heroStateForTodo(todo, device = {}, blockOnConnection = false) {
   if (!todo) {
-    if (device.online !== true) {
+    if (blockOnConnection && device.online !== true) {
       return {
         heroBadge: "等待药箱连接",
         heroLevel: "attention",
@@ -309,9 +339,6 @@ function homeCarePage(state = {}) {
   const reminderDose = reminderPlan.dose || reminderPlan.dosage || "";
   const reminderTime = String(reminderPlan.time || "--:--").slice(0, 5);
   const deviceOnline = Boolean(state.device && state.device.online);
-  const connectionState = String(
-    state.device && state.device.connection && state.device.connection.state || "unavailable",
-  );
 
   let focusTitle = "今天暂无用药计划";
   let focusSupporting = "有新的计划或照护记录时会自动更新。";
@@ -319,9 +346,9 @@ function homeCarePage(state = {}) {
   let focusAction = null;
   let focusActivation = "none";
   if (state.personaMigrating) {
-    focusTitle = "家人照护资料正在更新";
-    focusSupporting = "用药计划、问询和健康记录完成安全迁移后会自动恢复。";
-    focusState = { kind: "muted", label: "更新中" };
+    focusTitle = "家庭照护一站查看";
+    focusSupporting = "用药计划、问询和健康记录会集中显示在这里。";
+    focusState = { kind: "muted", label: "可浏览" };
   } else if (reminder && reminderKey) {
     focusTitle = `${reminderTime} · ${reminderPerson}`;
     focusSupporting = [reminderMedicine, reminderDose].filter(Boolean).join(" · ");
@@ -340,24 +367,21 @@ function homeCarePage(state = {}) {
       label: "查看计划用药",
     };
     focusActivation = "surface";
-  } else if (!deviceOnline) {
-    const connectionCopy = {
-      stale: ["照护信息等待更新", "家庭药箱重新连接后，今日计划会自动同步。", "待连接"],
-      loading: ["正在确认药箱状态", "连接确认完成后会自动显示今日计划。", "确认中"],
-      incompatible: ["云端版本待升级", "当前可继续查看上次同步内容。", "待升级"],
-      unpaired: ["请先配对药箱", "完成家庭药箱授权后即可查看照护计划。", "待配对"],
-      unavailable: ["药箱状态暂不可用", "网络恢复后会自动重新读取照护信息。", "稍后重试"],
-    }[connectionState] || ["药箱状态暂不可用", "请稍后重新读取照护信息。", "待确认"];
-    [focusTitle, focusSupporting] = connectionCopy;
-    focusState = { kind: "pending", label: connectionCopy[2] };
+  } else if (state.connectionIsBlocking && !deviceOnline) {
+    focusTitle = "药箱暂未连接";
+    focusSupporting = "当前照护信息可能不是最新，连接后会自动刷新。";
+    focusState = { kind: "pending", label: "待连接" };
     focusAction = { id: "home.focus.connection", label: "打开药箱设置" };
     focusActivation = "surface";
   }
 
   if (state.stale) {
-    focusSupporting = ["刷新失败，当前照护信息可能不是最新。", focusSupporting]
+    focusSupporting = [
+      `当前展示已保存内容 · ${state.lastSyncedAtText || "最近一次"}`,
+      focusSupporting,
+    ]
       .filter(Boolean)
-      .join(" ");
+      .join("。 ");
   }
 
   const attentionItems = [];
@@ -422,7 +446,7 @@ function homeCarePage(state = {}) {
         key: "home-health-measurement",
         symbol: "measure",
         title: "健康测量",
-        supporting: state.personaMigrating ? "家人健康记录正在更新" : state.latestVitalsText,
+        supporting: state.personaMigrating ? "查看已保存的家人健康记录" : state.latestVitalsText,
         state: { kind: "actionable", label: "查看" },
         action: { id: "home.vitals", label: "查看健康测量" },
       },
@@ -431,7 +455,7 @@ function homeCarePage(state = {}) {
         symbol: "timeline",
         title: "近期记录",
         supporting: state.personaMigrating
-          ? "照护动态完成更新后会自动显示"
+          ? "查看已保存的照护动态"
           : (state.latestCount ? `最近同步 ${state.latestCount} 条照护记录` : "还没有照护记录"),
         state: { kind: "muted", label: state.latestCount ? `${state.latestCount} 条` : "暂无" },
         action: { id: "home.timeline", label: "查看近期记录" },
@@ -448,7 +472,7 @@ function homeCarePage(state = {}) {
         symbol: "conversation",
         title: "问询摘要",
         supporting: state.personaMigrating
-          ? "家人问询资料正在更新"
+          ? "查看已保存的家人问询资料"
           : (state.inquiryCount ? `${state.inquiryCount} 条问询结论可查看` : "查看家人的健康问询结论"),
         state: { kind: "actionable", label: "查看" },
         action: { id: "home.inquiry", label: "打开家庭问询" },
@@ -501,51 +525,18 @@ function homeErrorCarePage(device = {}) {
 
 function homeDeviceAccessCarePage(session = {}) {
   const availability = String(session.availability || "").trim();
-  const copy = {
-    loading: {
-      title: "正在确认药箱状态",
-      supporting: "正在读取当前账号的药箱授权，请稍候。",
-      state: "确认中",
-    },
-    incompatible: {
-      title: "云端版本待升级",
-      supporting: session.message || "同步服务升级完成后会自动恢复。",
-      state: "待升级",
-    },
-    error: {
-      title: "药箱状态暂不可用",
-      supporting: session.message || "网络恢复后请重新进入页面。",
-      state: "稍后重试",
-    },
-    unpaired: {
-      title: "请先配对药箱",
-      supporting: session.message || "当前微信账号尚未配对药箱，请在家人页输入一次性配对码。",
-      state: "待配对",
-    },
-    "pairing-unavailable": {
-      title: "请先开通药箱权限",
-      supporting: session.message || "当前账号尚未获得药箱权限，请联系管理员。",
-      state: "待授权",
-    },
-    forbidden: {
-      title: "当前账号无权查看药箱",
-      supporting: session.message || "请重新配对药箱，或联系管理员确认照护权限。",
-      state: "无权限",
-    },
-  }[availability] || {
-    title: "请确认药箱权限",
-    supporting: session.message || "请在家人页确认当前账号可访问的药箱。",
-    state: "待确认",
-  };
+  const title = availability === "unpaired"
+    ? "请先配对药箱"
+    : (availability === "error" ? "药箱状态暂不可用" : "请确认药箱权限");
   return composeCarePage({
     key: "home-device-access",
     title: "家庭照护",
     showStatus: false,
     focus: {
       eyebrow: "药箱连接",
-      title: copy.title,
-      supporting: copy.supporting,
-      state: { kind: "pending", label: copy.state },
+      title,
+      supporting: session.message || "请在家人页确认当前账号可访问的药箱。",
+      state: { kind: "pending", label: availability === "unpaired" ? "待配对" : "待确认" },
       activation: "surface",
       action: { id: "home.focus.connection", label: "打开家人和药箱设置" },
     },
@@ -638,7 +629,9 @@ Page({
 
   async load(options = {}) {
     const app = getApp();
-    const requestDeviceId = String((app && app.globalData && app.globalData.deviceId) || "").trim();
+    const rawDeviceId = String(app && app.globalData && app.globalData.deviceId || "").trim();
+    const allowOfflineBrowsing = offlineBrowsingEnabled();
+    const requestDeviceId = allowOfflineBrowsing ? displayDeviceId(rawDeviceId) : rawDeviceId;
     const deviceSessionState = app && app.globalData && app.globalData.deviceSession || {};
     const loadRequestId = Number(this._loadRequestId || 0) + 1;
     this._loadRequestId = loadRequestId;
@@ -689,12 +682,38 @@ Page({
       this.setData({ carePage: homeDeviceAccessCarePage(deviceSessionState) });
       return;
     }
+    if (allowOfflineBrowsing && this._cacheHydratedDeviceId !== requestDeviceId) {
+      this._cacheHydratedDeviceId = requestDeviceId;
+      const restored = offlinePageCache.restorePage(requestDeviceId, HOME_CACHE_KEY);
+      if (restored) {
+        const cachedData = restored.data;
+        const cachedPlan = cachedData.reminderPlan || {};
+        const cachedPlanKey = cachedData.planItems && cachedData.planItems[0]
+          ? cachedData.planItems[0].planKey
+          : "";
+        this._reminderPlansByKey = cachedPlanKey ? { [cachedPlanKey]: cachedPlan } : {};
+        this._hasLoadedSnapshot = true;
+        this.setData(cachedData);
+      }
+    }
     try {
-      const [device, medicines] = await Promise.all([
-        api.getDeviceStrict(requestDeviceId),
-        api.getMedicinesStrict(requestDeviceId),
-      ]);
-      const [commandRead, snapshotRead, vitalsRead, safetyState] = await Promise.all([
+      const [deviceRead, medicineRead, commandRead, snapshotRead, vitalsRead, safetyRead] = await Promise.all([
+        api.getDeviceStrict(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({
+            value: this.data.device && this.data.device.deviceId === requestDeviceId
+              ? this.data.device
+              : fallbackDevice(requestDeviceId, error.message),
+            error,
+          }),
+        ),
+        api.getMedicinesStrict(requestDeviceId).then(
+          value => ({ value, error: null }),
+          error => ({
+            value: fallbackMedicines(),
+            error,
+          }),
+        ),
         api.getRecentCommandsStrict(12, requestDeviceId).then(
           value => ({ value, error: null }),
           error => ({ value: [], error }),
@@ -715,20 +734,52 @@ Page({
           unreadOnly: false,
           deviceId: requestDeviceId,
           includeLocalFixtures: true,
-        }),
+          allowUnavailableLocalFallback: allowOfflineBrowsing,
+        }).then(
+          value => ({ value, error: null }),
+          error => ({
+            value: medicationSafetyEvents.mergeLocalMedicationSafetyFixtures(
+              { availability: "unknown", events: [], message: "等待同步" },
+              requestDeviceId,
+              { includeLocalFixtures: true, allowUnavailableLocalFallback: allowOfflineBrowsing },
+            ),
+            error,
+          }),
+        ),
       ]);
+      const device = deviceRead.value;
+      const medicines = medicineRead.value;
       const commands = commandRead.value;
       const snapshot = snapshotRead.value;
       const vitals = vitalsRead.value;
-      const personaMigrating = [commandRead.error, snapshotRead.error, vitalsRead.error]
+      const safetyState = safetyRead.value;
+      const sourceErrors = [
+        deviceRead.error,
+        medicineRead.error,
+        commandRead.error,
+        snapshotRead.error,
+        vitalsRead.error,
+        safetyRead.error,
+      ].filter(Boolean);
+      const personaMigrating = sourceErrors
         .filter(Boolean)
         .some(deviceSession.isPersonaMigrationError);
       if (loadRequestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
-
-      const optionalReadError = [commandRead.error, snapshotRead.error, vitalsRead.error]
-        .filter(Boolean)
-        .find(error => !deviceSession.isPersonaMigrationError(error));
-      if (optionalReadError) throw optionalReadError;
+      const strictReadError = sourceErrors.find(error => !deviceSession.isPersonaMigrationError(error));
+      if (!allowOfflineBrowsing && strictReadError) throw strictReadError;
+      if (sourceErrors.length
+        && this._hasLoadedSnapshot === true
+        && this.data.offlineSnapshot === true
+        && String(this.data.deviceId || "").trim() === requestDeviceId) {
+        this.setData({
+          stale: true,
+          carePage: offlinePageCache.markCarePageStale(
+            this.data.carePage,
+            this.data.lastSyncedAtMs,
+          ),
+        });
+        return;
+      }
 
       const sameDeviceScope = this._hasLoadedSnapshot === true
         && String(this.data.safetyDeviceId || "") === requestDeviceId;
@@ -793,7 +844,9 @@ Page({
       const inventoryMedicines = medicineSummary.medicines;
       const risks = medicineRiskItems(inventoryMedicines.filter(item => !item.isDepleted));
       const depleted = depletedMedicineItems(inventoryMedicines);
-      const inventoryUnknownCount = inventoryMedicines.filter(item => item.isInventoryUnknown).length;
+      const inventoryUnknownCount = inventoryMedicines.filter(item => (
+        item.isInventoryUnknown && item.hasCloudRecord !== false
+      )).length;
       this._reminderPlansByKey = {};
       pendingPlans.forEach(plan => {
         this._reminderPlansByKey[planKey(plan)] = plan;
@@ -884,7 +937,7 @@ Page({
       todoItems.sort((a, b) => todoPriority(a) - todoPriority(b));
 
       const todoCount = todoItems.length;
-      const heroState = heroStateForTodo(todoItems[0], device);
+      const heroState = heroStateForTodo(todoItems[0], device, !allowOfflineBrowsing);
 
       const planItems = todoItems.filter(item => item.action === "remind");
       const nextPlan = pendingPlans[0] || null;
@@ -955,11 +1008,27 @@ Page({
         unreadRiskCount: safetyOverviewProjection.unreadBlockedCount + safetyOverviewProjection.unreadCheckFailedCount,
         riskCount,
         personaMigrating,
-        stale: transientSafetyFailure,
+        connectionIsBlocking: !allowOfflineBrowsing,
+        offlineSnapshot: false,
+        lastSyncedAtMs: Date.now(),
+        stale: sourceErrors.some(error => !deviceSession.isPersonaMigrationError(error))
+          || transientSafetyFailure,
       };
+      nextData.lastSyncedAtText = offlinePageCache.formatUpdatedAt(nextData.lastSyncedAtMs);
       nextData.carePage = homeCarePage(nextData);
       this._hasLoadedSnapshot = true;
       this.setData(nextData);
+      if (sourceErrors.length < 6) {
+        offlinePageCache.savePage(
+          requestDeviceId,
+          HOME_CACHE_KEY,
+          Object.assign({}, this.data, nextData),
+          {
+            updatedAtMs: nextData.lastSyncedAtMs,
+            quality: nextData.stale ? "partial" : "complete",
+          },
+        );
+      }
     } catch (error) {
       if (loadRequestId !== this._loadRequestId || activeDeviceId() !== requestDeviceId) return;
       if (options.background !== true) {
@@ -969,12 +1038,39 @@ Page({
         && String(this.data.deviceId || "").trim() === requestDeviceId;
       if (!sameDeviceSnapshot) {
         this._reminderPlansByKey = {};
-        this.setData({ carePage: homeErrorCarePage(this.data.device) });
+        if (!allowOfflineBrowsing) {
+          this.setData({ carePage: homeErrorCarePage(this.data.device) });
+          return;
+        }
+        const summary = medicineLibrary.summarizeMedicineLibrary(fallbackMedicines());
+        const safetyState = medicationSafetyEvents.mergeLocalMedicationSafetyFixtures(
+          { availability: "unknown", events: [], message: "等待同步" },
+          requestDeviceId,
+          { includeLocalFixtures: true, allowUnavailableLocalFallback: true },
+        );
+        const registry = medicationSafetyEvents.projectRiskRegistry(safetyState.events || []);
+        const fallbackData = Object.assign({}, this.data, {
+          device: fallbackDevice(requestDeviceId, error.message),
+          deviceId: requestDeviceId,
+          stockCount: summary.medicineCount,
+          inventoryUnknownCount: 0,
+          safetyState,
+          safetyDeviceId: requestDeviceId,
+          riskCount: registry.all.length,
+          unreadRiskCount: registry.all.filter(item => item.readState === "UNREAD").length,
+          latestVitalsText: "暂无健康测量记录",
+          stale: true,
+        });
+        fallbackData.carePage = homeCarePage(fallbackData);
+        this._hasLoadedSnapshot = true;
+        this.setData(fallbackData);
       } else {
         const stale = true;
         this.setData({
           stale,
-          carePage: homeCarePage(Object.assign({}, this.data, { stale })),
+          carePage: this.data.offlineSnapshot
+            ? offlinePageCache.markCarePageStale(this.data.carePage, this.data.lastSyncedAtMs)
+            : homeCarePage(Object.assign({}, this.data, { stale })),
         });
       }
       if (options.background === true) throw error;
@@ -987,25 +1083,10 @@ Page({
       this.setData({
         carePage: loadingCarePage("家庭照护", "正在重新确认账号可访问的药箱…"),
       });
-      let session;
       try {
-        session = await app.refreshDeviceSession();
+        await app.refreshDeviceSession();
       } catch (error) {
         console.warn("home device session refresh failed", error);
-        session = {
-          mode: "unknown",
-          availability: "error",
-          message: "暂时无法确认账号可访问的药箱，请稍后重试",
-        };
-      }
-      if (!activeDeviceId()) {
-        this.stopRealtime();
-        this.setData({
-          carePage: homeDeviceAccessCarePage(
-            session || (app.globalData && app.globalData.deviceSession) || {},
-          ),
-        });
-        return undefined;
       }
       const loading = this.load();
       this.startRealtime();
@@ -1032,6 +1113,10 @@ Page({
     const plan = planOverride || this.data.reminderPlan || {};
     const requestDeviceId = String(deviceIdOverride || this.data.deviceId || "").trim();
     const activeDeviceId = String((getApp().globalData && getApp().globalData.deviceId) || "").trim();
+    if (this.data.offlineSnapshot || !(this.data.device && this.data.device.online)) {
+      wx.showToast({ title: "药箱在线后可发送提醒", icon: "none" });
+      return;
+    }
     if (!requestDeviceId || activeDeviceId !== requestDeviceId) {
       wx.showToast({ title: "药箱已切换，请重新选择", icon: "none" });
       return;

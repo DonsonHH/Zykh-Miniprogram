@@ -438,7 +438,8 @@ function eventPresentation(value = {}) {
 }
 
 function mergeLocalMedicationSafetyFixtures(state = {}, deviceId = "", options = {}) {
-  if (options.includeLocalFixtures !== true || state.availability !== "ready") return state;
+  if (options.includeLocalFixtures !== true || state.availability === "forbidden") return state;
+  if (state.availability !== "ready" && options.allowUnavailableLocalFallback !== true) return state;
   if (Array.isArray(state.events) && state.events.length) return state;
 
   const fixtures = fixedMedicationRisks
@@ -447,9 +448,12 @@ function mergeLocalMedicationSafetyFixtures(state = {}, deviceId = "", options =
   if (!fixtures.length) return state;
 
   return Object.assign({}, state, {
-    message: "",
+    availability: "ready",
+    message: state.availability === "ready" ? "" : "已显示家庭登记的风险，联网后自动更新",
     events: fixtures,
     localFallback: true,
+    stale: state.availability !== "ready",
+    deviceId: text(deviceId),
   });
 }
 
@@ -545,22 +549,22 @@ function createMedicationSafetyEventModule(gateway = {}) {
         capabilitySnapshot = await gateway.getCapabilitiesStrict(options.deviceId || "");
       } catch (error) {
         if (isForbiddenError(error)) return forbiddenState(error);
-        return {
+        return mergeLocalMedicationSafetyFixtures({
           availability: "unknown",
           message: "暂时无法确认安全记录是否为最新",
           events: [],
           nextCursor: "",
           error,
-        };
+        }, options.deviceId, options);
       }
       if (!supportsMedicationSafetyEvents(capabilitySnapshot)) {
-        return {
+        return mergeLocalMedicationSafetyFixtures({
           availability: "unsupported",
           message: "当前云端版本尚未支持用药风险记录",
           events: [],
           nextCursor: "",
           capabilitySnapshot,
-        };
+        }, options.deviceId, options);
       }
       try {
         const result = await gateway.getMedicationSafetyEventsStrict(options);
@@ -583,14 +587,14 @@ function createMedicationSafetyEventModule(gateway = {}) {
         return mergeLocalMedicationSafetyFixtures(state, options.deviceId, options);
       } catch (error) {
         if (isForbiddenError(error)) return forbiddenState(error, { capabilitySnapshot });
-        return {
+        return mergeLocalMedicationSafetyFixtures({
           availability: "error",
           message: "用药风险记录读取失败，请稍后重试",
           events: [],
           nextCursor: "",
           capabilitySnapshot,
           error,
-        };
+        }, options.deviceId, options);
       }
     },
 
